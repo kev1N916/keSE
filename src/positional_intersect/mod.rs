@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-
 use crate::{dictionary::Posting, search_engine::PostingOffset};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -66,40 +65,40 @@ pub fn find_documents_optimized(
         None => return Vec::new(),
     };
 
-
+    let mut matching_docs=Vec::new();
     // Iterate through shortest posting list
     for posting in shortest_postings {
         let doc_id = posting.doc_id;
 
         // Collect postings for this doc_id from all terms in the phrase
-        let mut doc_postings = Vec::with_capacity(words.len());
+        // let  doc_postings = Vec::with_capacity(words.len());
         let mut all_found = true;
 
-        for word in words {
-            if let Some((_, term_postings_list)) = term_postings.get(&word) {
-                if let Ok(idx) = term_postings_list.binary_search_by_key(&doc_id, |p| p.doc_id) {
-                    doc_postings.push(word, &term_postings_list[idx]));
-                } else {
-                    all_found = false;
-                    break;
-                }
-            } else {
-                all_found = false;
-                break;
-            }
-        }
+        // for word in words {
+        //     if let Some((_, term_postings_list)) = term_postings.get(&word) {
+        //         if let Ok(idx) = term_postings_list.binary_search_by_key(&doc_id, |p| p.doc_id) {
+        //             doc_postings.push(word, &term_postings_list[idx]));
+        //         } else {
+        //             all_found = false;
+        //             break;
+        //         }
+        //     } else {
+        //         all_found = false;
+        //         break;
+        //     }
+        // }
 
-        if all_found {
-            // Sort by posting_offset to maintain phrase order
-            doc_postings.sort_by_key(|&(offset, _)| offset);
+        // if all_found {
+        //     // Sort by posting_offset to maintain phrase order
+        //     doc_postings.sort_by_key(|&(offset,&_)| offset);
 
-            let postings_only: Vec<&Posting> =
-                doc_postings.iter().map(|(_, posting)| *posting).collect();
+        //     let postings_only: Vec<&Posting> =
+        //         doc_postings.iter().map(|(_, posting)| *posting).collect();
 
-            if has_consecutive_positions(&postings_only) && phrase_matching {
-                matching_docs.push(doc_id);
-            }
-        }
+        //     if has_consecutive_positions(&postings_only) && phrase_matching {
+        //         matching_docs.push(doc_id);
+        //     }
+        // }
     }
 
     matching_docs

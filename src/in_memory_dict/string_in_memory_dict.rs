@@ -1,17 +1,17 @@
-pub struct InMemoryPointer {
+pub struct StringInMemoryDictPointer {
     pub term_offset: Option<u32>,
     pub term_frequency: u32,
     pub posting_offset: u32,
 }
-pub struct InMemoryDict {
+pub struct StringInMemoryDict {
     block_size: u8,
     term_string: String,
-    term_array: Vec<InMemoryPointer>,
+    term_array: Vec<StringInMemoryDictPointer>,
 }
 
-impl InMemoryDict {
-    pub fn new(block_size: u8) -> InMemoryDict {
-        return InMemoryDict {
+impl StringInMemoryDict {
+    pub fn new(block_size: u8) -> StringInMemoryDict {
+        return StringInMemoryDict {
             block_size: block_size,
             term_array: Vec::new(),
             term_string: String::new(),
@@ -20,15 +20,15 @@ impl InMemoryDict {
     pub fn add_term(&mut self, term: &str, posting_offset: u32, term_frequency: u32) {
         self.term_string.push(term.len() as u8 as char);
         self.term_string.push_str(term);
-        let is_new_block_beginning = ((self.term_array.len()) as u8) % self.block_size == 0;
+        let is_new_block_beginning: bool = ((self.term_array.len()) as u8) % self.block_size == 0;
         if is_new_block_beginning {
-            self.term_array.push(InMemoryPointer {
+            self.term_array.push(StringInMemoryDictPointer {
                 term_offset: Some((self.term_string.len() - term.len() - 1) as u32),
                 term_frequency,
                 posting_offset,
             });
         } else {
-            self.term_array.push(InMemoryPointer {
+            self.term_array.push(StringInMemoryDictPointer {
                 term_offset: None,
                 term_frequency,
                 posting_offset,
@@ -180,7 +180,7 @@ mod tests {
 
     #[test]
     fn test_new_dict_creation() {
-        let dict = InMemoryDict::new(4);
+        let dict = StringInMemoryDict::new(4);
         assert_eq!(dict.block_size, 4);
         assert!(dict.term_array.is_empty());
         assert!(dict.term_string.is_empty());
@@ -188,14 +188,14 @@ mod tests {
 
     #[test]
     fn test_add_single_term() {
-        let mut dict = InMemoryDict::new(2);
+        let mut dict = StringInMemoryDict::new(2);
         dict.add_term("hello", 100, 5);
-        
+
         assert_eq!(dict.term_array.len(), 1);
         assert_eq!(dict.term_array[0].term_offset, Some(0));
         assert_eq!(dict.term_array[0].term_frequency, 5);
         assert_eq!(dict.term_array[0].posting_offset, 100);
-        
+
         // Check term_string format: length byte + term
         assert_eq!(dict.term_string.len(), 6); // 1 byte for length + 5 bytes for "hello"
         assert_eq!(dict.term_string.as_bytes()[0], 5); // length of "hello"
@@ -204,17 +204,17 @@ mod tests {
 
     #[test]
     fn test_add_multiple_terms_within_block() {
-        let mut dict = InMemoryDict::new(3);
+        let mut dict = StringInMemoryDict::new(3);
         dict.add_term("cat", 10, 2);
         dict.add_term("dog", 20, 3);
-        
+
         assert_eq!(dict.term_array.len(), 2);
-        
+
         // First term should have offset (block start)
         assert_eq!(dict.term_array[0].term_offset, Some(0));
         assert_eq!(dict.term_array[0].term_frequency, 2);
         assert_eq!(dict.term_array[0].posting_offset, 10);
-        
+
         // Second term should not have offset (within same block)
         assert_eq!(dict.term_array[1].term_offset, None);
         assert_eq!(dict.term_array[1].term_frequency, 3);
@@ -223,53 +223,53 @@ mod tests {
 
     #[test]
     fn test_add_terms_across_blocks() {
-        let mut dict = InMemoryDict::new(2);
+        let mut dict = StringInMemoryDict::new(2);
         dict.add_term("a", 10, 1);
         dict.add_term("b", 20, 2);
         dict.add_term("c", 30, 3); // This should start a new block
-        
+
         assert_eq!(dict.term_array.len(), 3);
-        
+
         // First term (block start)
         assert_eq!(dict.term_array[0].term_offset, Some(0));
-        
+
         // Second term (within first block)
         assert_eq!(dict.term_array[1].term_offset, None);
-        
+
         // Third term (new block start)
         assert!(dict.term_array[2].term_offset.is_some());
     }
 
     #[test]
     fn test_get_starting_term_from_block() {
-        let mut dict = InMemoryDict::new(2);
+        let mut dict = StringInMemoryDict::new(2);
         dict.add_term("hello", 10, 1);
         dict.add_term("world", 20, 2);
-        
+
         let term = dict.get_starting_term_from_block(0);
         assert_eq!(term, "hello");
     }
 
     #[test]
     fn test_get_starting_term_from_block_invalid_offset() {
-        let mut dict = InMemoryDict::new(2);
+        let mut dict = StringInMemoryDict::new(2);
         dict.add_term("test", 10, 1);
-        
+
         let term = dict.get_starting_term_from_block(1000);
         assert_eq!(term, String::new());
     }
 
     #[test]
     fn test_find_term_offset_within_block() {
-        let mut dict = InMemoryDict::new(3);
+        let mut dict = StringInMemoryDict::new(3);
         dict.add_term("apple", 10, 1);
         dict.add_term("banana", 20, 2);
         dict.add_term("cherry", 30, 3);
-        
+
         // Find "banana" within the block starting at offset 0
         let offset = dict.find_term_offset_within_block("banana", 0);
         assert_eq!(offset, 1); // Should be at index 1 within the block
-        
+
         // Find non-existent term
         let offset = dict.find_term_offset_within_block("grape", 0);
         assert_eq!(offset, 3); // Should return block_size
@@ -277,32 +277,32 @@ mod tests {
 
     #[test]
     fn test_find_block_start() {
-        let mut dict = InMemoryDict::new(2);
+        let mut dict = StringInMemoryDict::new(2);
         dict.add_term("apple", 100, 5);
         dict.add_term("banana", 200, 3);
         dict.add_term("cherry", 300, 4); // New block
         dict.add_term("date", 400, 2);
-        
+
         // Test finding block starts
         assert_eq!(dict.find_block_start(0), 0); // First block
         assert_eq!(dict.find_block_start(1), 0); // Still first block
         assert_eq!(dict.find_block_start(2), 2); // Second block
         assert_eq!(dict.find_block_start(3), 2); // Still second block
-        
+
         // Test out of bounds
         assert_eq!(dict.find_block_start(100), -1);
     }
 
     #[test]
     fn test_get_next_block_start() {
-        let mut dict = InMemoryDict::new(2);
+        let mut dict = StringInMemoryDict::new(2);
         dict.add_term("apple", 100, 5);
         dict.add_term("banana", 200, 3);
         dict.add_term("cherry", 300, 4); // New block
         dict.add_term("date", 400, 2);
         dict.add_term("elderberry", 500, 1); // Another new block
         dict.add_term("fig", 600, 3);
-        
+
         // Test getting next block starts
         assert_eq!(dict.get_next_block_start(0), 2); // From first block to second
         assert_eq!(dict.get_next_block_start(2), 4); // From second block to third
@@ -311,44 +311,44 @@ mod tests {
 
     #[test]
     fn test_find_existing_term() {
-        let mut dict = InMemoryDict::new(2);
+        let mut dict = StringInMemoryDict::new(2);
         dict.add_term("apple", 100, 5);
         dict.add_term("banana", 200, 3);
-        
+
         let posting_offset = dict.find("apple");
         assert_eq!(posting_offset, 100);
-        
+
         let posting_offset = dict.find("banana");
         assert_eq!(posting_offset, 200);
     }
 
     #[test]
     fn test_find_non_existing_term() {
-        let mut dict = InMemoryDict::new(2);
+        let mut dict = StringInMemoryDict::new(2);
         dict.add_term("apple", 100, 5);
         dict.add_term("banana", 200, 3);
-        
+
         let posting_offset = dict.find("cherry");
         assert_eq!(posting_offset, -1);
     }
 
     #[test]
     fn test_find_empty_dict() {
-        let mut dict = InMemoryDict::new(2);
+        let mut dict = StringInMemoryDict::new(2);
         let posting_offset = dict.find("anything");
         assert_eq!(posting_offset, -1);
     }
 
     #[test]
     fn test_find_with_multiple_blocks() {
-        let mut dict = InMemoryDict::new(2);
+        let mut dict = StringInMemoryDict::new(2);
         dict.add_term("apple", 10, 1);
         dict.add_term("apricot", 20, 2);
         dict.add_term("banana", 30, 3); // New block
         dict.add_term("berry", 40, 4);
         dict.add_term("cherry", 50, 5); // Another new block
         dict.add_term("citrus", 60, 6);
-        
+
         assert_eq!(dict.find("apple"), 10);
         assert_eq!(dict.find("apricot"), 20);
         assert_eq!(dict.find("banana"), 30);
@@ -359,30 +359,30 @@ mod tests {
 
     #[test]
     fn test_block_size_one() {
-        let mut dict = InMemoryDict::new(1);
+        let mut dict = StringInMemoryDict::new(1);
         dict.add_term("single", 100, 1);
         dict.add_term("terms", 200, 2);
-        
+
         // Every term should have an offset since block_size is 1
         assert!(dict.term_array[0].term_offset.is_some());
         assert!(dict.term_array[1].term_offset.is_some());
-        
+
         assert_eq!(dict.find("single"), 100);
         assert_eq!(dict.find("terms"), 200);
     }
 
     #[test]
     fn test_large_block_size() {
-        let mut dict = InMemoryDict::new(255);
+        let mut dict = StringInMemoryDict::new(255);
         dict.add_term("test1", 10, 1);
         dict.add_term("test2", 20, 2);
         dict.add_term("test3", 30, 3);
-        
+
         // All should be in the same block
         assert!(dict.term_array[0].term_offset.is_some());
         assert_eq!(dict.term_array[1].term_offset, None);
         assert_eq!(dict.term_array[2].term_offset, None);
-        
+
         assert_eq!(dict.find("test1"), 10);
         assert_eq!(dict.find("test2"), 20);
         assert_eq!(dict.find("test3"), 30);
@@ -390,7 +390,7 @@ mod tests {
 
     #[test]
     fn test_binary_search_behavior_alphabetical() {
-        let mut dict = InMemoryDict::new(2);
+        let mut dict = StringInMemoryDict::new(2);
         // Add terms in alphabetical order to test binary search
         dict.add_term("apple", 10, 1);
         dict.add_term("apricot", 20, 2);
@@ -398,7 +398,7 @@ mod tests {
         dict.add_term("berry", 40, 4);
         dict.add_term("cherry", 50, 5);
         dict.add_term("citrus", 60, 6);
-        
+
         assert_eq!(dict.find("apple"), 10);
         assert_eq!(dict.find("apricot"), 20);
         assert_eq!(dict.find("banana"), 30);
@@ -410,13 +410,12 @@ mod tests {
         assert_eq!(dict.find("zzz"), -1); // After last term
     }
 
-   
     #[test]
     fn test_unicode_terms() {
-        let mut dict = InMemoryDict::new(2);
+        let mut dict = StringInMemoryDict::new(2);
         dict.add_term("café", 100, 1);
         dict.add_term("naïve", 200, 2);
-        
+
         assert_eq!(dict.find("café"), 100);
         assert_eq!(dict.find("naïve"), 200);
         assert_eq!(dict.find("cafe"), -1); // Different from "café"
@@ -424,10 +423,10 @@ mod tests {
 
     #[test]
     fn test_case_sensitivity() {
-        let mut dict = InMemoryDict::new(2);
+        let mut dict = StringInMemoryDict::new(2);
         dict.add_term("Test", 100, 1);
         dict.add_term("test", 200, 2);
-        
+
         assert_eq!(dict.find("Test"), 100);
         assert_eq!(dict.find("test"), 200);
         assert_eq!(dict.find("TEST"), -1);
@@ -435,12 +434,12 @@ mod tests {
 
     #[test]
     fn test_edge_case_single_character_terms() {
-        let mut dict = InMemoryDict::new(3);
+        let mut dict = StringInMemoryDict::new(3);
         dict.add_term("a", 10, 1);
         dict.add_term("b", 20, 2);
         dict.add_term("c", 30, 3);
         dict.add_term("z", 40, 4); // New block
-        
+
         assert_eq!(dict.find("a"), 10);
         assert_eq!(dict.find("b"), 20);
         assert_eq!(dict.find("c"), 30);
@@ -450,15 +449,14 @@ mod tests {
 
     #[test]
     fn test_find_exact_block_boundary() {
-        let mut dict = InMemoryDict::new(2);
+        let mut dict = StringInMemoryDict::new(2);
         dict.add_term("first", 10, 1);
         dict.add_term("second", 20, 2);
         dict.add_term("third", 30, 3); // Block boundary
         dict.add_term("fourth", 40, 4);
-        
-        // Test finding terms that are exactly at block boundaries
-        assert_eq!(dict.find("first"), 10);  // First term in first block
-        assert_eq!(dict.find("third"), 30);  // First term in second block
-    }
 
+        // Test finding terms that are exactly at block boundaries
+        assert_eq!(dict.find("first"), 10); // First term in first block
+        assert_eq!(dict.find("third"), 30); // First term in second block
+    }
 }

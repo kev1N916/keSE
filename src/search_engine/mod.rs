@@ -1,24 +1,12 @@
 use std::{
-    collections::{BinaryHeap, HashMap, btree_set::Union},
+    collections::{BinaryHeap, HashMap},
     fs::{self, File},
     io::{self, Read, Seek},
     sync::{Arc, Mutex, mpsc},
     thread,
 };
 
-use crate::{
-    bk_tree::BkTree,
-    dictionary::{self, Dictionary, Posting},
-    helpers::merge_index_files,
-    in_memory_dict::InMemoryDict,
-    positional_intersect::find_documents_optimized,
-    scoring::{
-        ScoredDoc, get_document_frequency, get_inverse_document_frequency, get_term_frequency,
-        get_tf_idf_weight,
-    },
-    spimi::{vb_decode_posting_list, write_block_to_disk},
-    tokenizer::SearchTokenizer,
-};
+use crate::{dictionary::{Dictionary, Posting}, indexer::{helper::vb_decode_posting_list, index_merge_iterator::merge_index_files, spimi::write_block_to_disk}, my_bk_tree::BkTree, positional_intersect::find_documents_optimized, scoring::{ScoredDoc, get_document_frequency, get_inverse_document_frequency, get_term_frequency, get_tf_idf_weight}, tokenizer::SearchTokenizer};
 
 pub struct QueryResult {
     doc_ids: Vec<u32>,
@@ -45,7 +33,7 @@ pub struct SearchEngine {
     doc_id: u32,
     query_parser: SearchTokenizer,
     doc_length: Vec<f32>,
-    in_memory_index: Arc<Mutex<InMemoryDict>>,
+    // in_memory_index: Arc<Mutex<InMemoryDict>>,
     indexing_dictionary: Arc<Mutex<Dictionary>>,
     index_path: String,
 }
@@ -69,7 +57,7 @@ impl SearchEngine {
             doc_id: 0,
             doc_length: Vec::new(),
             query_parser: query_parser,
-            in_memory_index: Arc::new(Mutex::new(InMemoryDict::new(block_size))),
+            // in_memory_index: Arc::new(Mutex::new(InMemoryDict::new(block_size))),
             indexing_dictionary: Arc::new(Mutex::new(Dictionary::new())),
             index_path: index_path,
         })
@@ -142,15 +130,15 @@ impl SearchEngine {
         }
 
         let merge_index_result = merge_index_files(4)?;
-        let Some(merge_index) = merge_index_result else {
-            return Err(io::Error::new(io::ErrorKind::Unsupported, ""));
-        };
+        // let Some(merge_index) = merge_index_result else {
+        //     return Err(io::Error::new(io::ErrorKind::Unsupported, ""));
+        // };
 
-        self.doc_length = merge_index.doc_lengths;
-        self.bk_tree = merge_index.bk_tree;
+        // self.doc_length = merge_index.doc_lengths;
+        // self.bk_tree = merge_index.bk_tree;
         let index_file = File::open("final.idx")?;
         self.index_file = Some(Mutex::new(index_file));
-        self.in_memory_index = Arc::new(Mutex::new(merge_index.in_memory_dict));
+        // self.in_memory_index = Arc::new(Mutex::new(merge_index.in_memory_dict));
         Ok(())
     }
 
@@ -237,23 +225,23 @@ impl SearchEngine {
         let mut bigram_words = Vec::new();
 
         for token in &tokens.unigram {
-            let posting_offset = self.in_memory_index.lock().unwrap().find(&token.word);
+            // let posting_offset = self.in_memory_index.lock().unwrap().find(&token.word);
             let word = &token.word;
-            unigram_words.push(word);
-            unigram_posting_offsets.push(PostingOffset {
-                word: word.clone(),
-                posting_offset: posting_offset,
-            });
+            unigram_words.push(word.clone());
+            // unigram_posting_offsets.push(PostingOffset {
+            //     word: word.clone(),
+            //     posting_offset: posting_offset,
+            // });
         }
 
         for token in &tokens.bigram {
-            let posting_offset = self.in_memory_index.lock().unwrap().find(&token.word);
+            // let posting_offset = self.in_memory_index.lock().unwrap().find(&token.word);
             let word = &token.word;
-            bigram_words.push(word);
-            bigram_posting_offsets.push(PostingOffset {
-                word: word.clone(),
-                posting_offset: posting_offset,
-            });
+            bigram_words.push(word.clone());
+            // bigram_posting_offsets.push(PostingOffset {
+            //     word: word.clone(),
+            //     posting_offset: posting_offset,
+            // });
         }
 
         let unigram_postings_list: HashMap<String, (u16, Vec<Posting>)> =
@@ -278,7 +266,7 @@ impl SearchEngine {
         // Thread 1: Top-K scoring with BinaryHeap
         let handle1 = thread::spawn(move || {
             let docs =
-                find_documents_optimized(&unigram_posting_offsets, &unigram_postings_list, true);
+                find_documents_optimized(unigram_words, &unigram_postings_list, true);
 
             let mut max_heap: BinaryHeap<ScoredDoc> = BinaryHeap::new();
             for doc_id in docs {
@@ -302,7 +290,7 @@ impl SearchEngine {
         // Thread 2: Simple sorting approach (alternative ranking)
         let handle2 = thread::spawn(move || {
             let docs =
-                find_documents_optimized(&bigram_posting_offsets, &bigram_postings_list, false);
+                find_documents_optimized(bigram_words, &bigram_postings_list, false);
 
             let mut max_heap: BinaryHeap<ScoredDoc> = BinaryHeap::new();
             for doc_id in docs {
@@ -325,19 +313,19 @@ impl SearchEngine {
 
         // Thread 3: Statistical analysis of scores
         let handle3 = thread::spawn(move || {
-            let docs = find_documents_optimized(
-                &unigram_postings_offsets_copy,
-                &unigram_postings_list_copy,
-                false,
-            );
+            // let docs = find_documents_optimized(
+            //     &unigram_postings_offsets_copy,
+            //     &unigram_postings_list_copy,
+            //     false,
+            // );
 
             let mut max_heap: BinaryHeap<ScoredDoc> = BinaryHeap::new();
-            for doc_id in docs {
-                max_heap.push(ScoredDoc {
-                    doc_id: doc_id,
-                    score: unigram_scores_copy[(doc_id - 1) as usize],
-                });
-            }
+            // for doc_id in docs {
+            //     max_heap.push(ScoredDoc {
+            //         doc_id: doc_id,
+            //         score: unigram_scores_copy[(doc_id - 1) as usize],
+            //     });
+            // }
 
             let k = 2;
             let mut top_k = Vec::new();
