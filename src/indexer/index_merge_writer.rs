@@ -4,11 +4,7 @@ use std::{
     io::{self, BufWriter, Write},
 };
 
-use crate::{
-    compressors::vb_encode::vb_encode, dictionary::Posting, indexer::helper::vb_encode_positions,
-};
-
-const POSITIONS_DELIMITER: u8 = 0x00;
+use crate::{dictionary::Posting, indexer::chunk::Chunk};
 
 /*
 An inverted list in the index will often stretch across
@@ -62,65 +58,6 @@ All the numbers here will be VB-encoded
 //     max_doc_id: u32,
 //     size_of_chunk: u32,
 // }
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Chunk {
-    size_of_chunk: u32, // stored on disk
-    max_doc_id: u32,    // stored on disk
-    doc_ids: Vec<u8>,   // stored on disk
-    positions: Vec<u8>, // stored on disk
-    no_of_postings: u8,
-    term: u32,
-    last_doc_id: u32,
-}
-
-impl Chunk {
-    pub fn new(term: u32) -> Self {
-        Self {
-            size_of_chunk: 8,
-            max_doc_id: 0,
-            last_doc_id: 0,
-            no_of_postings: 0,
-            term: term,
-            doc_ids: Vec::new(),
-            positions: Vec::new(),
-        }
-    }
-
-    // pub fn is_empty(&mut self) -> bool {
-    //     self.size_of_chunk == 8
-    // }
-    pub fn reset(&mut self) {
-        self.size_of_chunk = 8;
-        self.last_doc_id = 0;
-        self.max_doc_id = 0;
-        self.positions.clear();
-        self.doc_ids.clear();
-        self.no_of_postings = 0;
-    }
-    pub fn add_encoded_doc_id(&mut self, doc_id: u32, encoded_doc_id: Vec<u8>) {
-        self.last_doc_id = doc_id;
-        self.size_of_chunk += encoded_doc_id.len() as u32;
-        self.doc_ids.extend_from_slice(&encoded_doc_id);
-    }
-    pub fn encode_doc_id(&mut self, doc_id: u32) -> Vec<u8> {
-        let encoded_doc_id: Vec<u8> = vb_encode(&(doc_id - self.last_doc_id));
-        encoded_doc_id
-    }
-    pub fn add_encoded_positions(&mut self, encoded_positions: Vec<u8>) {
-        self.size_of_chunk += encoded_positions.len() as u32;
-        self.positions.extend_from_slice(&encoded_positions);
-    }
-    pub fn encode_positions(&mut self, positions: &Vec<u32>) -> Vec<u8> {
-        let mut encoded_positions: Vec<u8> = vb_encode_positions(&positions);
-        encoded_positions.push(POSITIONS_DELIMITER);
-        encoded_positions
-    }
-
-    pub fn set_max_doc_id(&mut self, doc_id: u32) {
-        let _ = self.max_doc_id.max(doc_id);
-    }
-}
 
 pub struct TermMetadata {
     pub block_ids: Vec<u32>,
@@ -203,6 +140,7 @@ impl MergedIndexBlockWriter {
         loop {
             if current_chunk.no_of_postings >= 128 {
                 // if !current_chunk.is_empty() {
+                current_chunk.finish();
                 self.add_chunk_to_block(current_chunk.clone());
                 // }
                 current_chunk.reset();
@@ -210,6 +148,7 @@ impl MergedIndexBlockWriter {
             }
             if i == postings.len() {
                 // if !current_chunk.is_empty() {
+                current_chunk.finish();
                 self.add_chunk_to_block(current_chunk.clone());
                 self.write_block_to_index_file()?;
                 self.reset();
@@ -224,6 +163,7 @@ impl MergedIndexBlockWriter {
             if self.current_block_size + size_of_posting
                 > (self.max_block_size as u32 * 1000).into()
             {
+                current_chunk.finish();
                 self.add_chunk_to_block(current_chunk.clone());
                 self.write_block_to_index_file()?;
                 self.reset();
@@ -252,10 +192,7 @@ impl MergedIndexBlockWriter {
                 term_set.insert(chunk.term);
                 term_offsets.extend(term_offset_start.to_le_bytes());
             }
-            encoded_chunks.extend_from_slice(&chunk.size_of_chunk.to_le_bytes());
-            encoded_chunks.extend_from_slice(&chunk.max_doc_id.to_le_bytes());
-            encoded_chunks.extend(&chunk.doc_ids);
-            encoded_chunks.extend(&chunk.positions);
+            encoded_chunks.extend(&chunk.encode());
             term_offset_start += (chunk.doc_ids.len() + chunk.positions.len() + 8) as u16;
         }
 
@@ -263,10 +200,10 @@ impl MergedIndexBlockWriter {
             self.add_block_to_term_metadata(term, block_no);
         }
 
-        self.file_writer.write(&no_of_terms)?;
-        self.file_writer.write(&encoded_terms)?;
-        self.file_writer.write(&term_offsets)?;
-        self.file_writer.write(&encoded_chunks)?;
+        self.file_writer.write_all(&no_of_terms)?;
+        self.file_writer.write_all(&encoded_terms)?;
+        self.file_writer.write_all(&term_offsets)?;
+        self.file_writer.write_all(&encoded_chunks)?;
         self.file_writer.flush()?;
         self.current_block_no += 1;
         Ok(())

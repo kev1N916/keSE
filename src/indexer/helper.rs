@@ -1,7 +1,15 @@
-use crate::{compressors::vb_encode::{vb_decode, vb_encode}, dictionary::Posting};
+use std::{
+    fs::File,
+    io::{self, BufReader, Read, Seek},
+};
 
+use crate::{
+    compressors::vb_encode::{vb_decode, vb_encode},
+    dictionary::Posting,
+    indexer::chunk::Chunk,
+};
 
-pub (crate) fn vb_decode_positions(bytes: &[u8]) -> Vec<u32> {
+pub(crate) fn vb_decode_positions(bytes: &[u8]) -> Vec<u32> {
     let mut positions = Vec::new();
     let mut offset = 0;
     let mut last_position = 0;
@@ -23,7 +31,7 @@ pub (crate) fn vb_decode_positions(bytes: &[u8]) -> Vec<u32> {
     positions
 }
 
-pub (crate) fn vb_encode_positions(positions: &Vec<u32>) -> Vec<u8> {
+pub(crate) fn vb_encode_positions(positions: &Vec<u32>) -> Vec<u8> {
     let mut vb_encoded_positions = Vec::<u8>::new();
     let mut last_position = 0;
     for position in positions {
@@ -41,7 +49,7 @@ pub (crate) fn vb_encode_positions(positions: &Vec<u32>) -> Vec<u8> {
     vb_encoded_positions
 }
 
-pub (crate) fn vb_decode_posting_list(encoded_bytes: &[u8]) -> Vec<Posting> {
+pub(crate) fn vb_decode_posting_list(encoded_bytes: &[u8]) -> Vec<Posting> {
     let mut posting_list: Vec<Posting> = Vec::new();
     let mut offset = 0;
     let mut last_doc_id = 0;
@@ -82,7 +90,7 @@ pub (crate) fn vb_decode_posting_list(encoded_bytes: &[u8]) -> Vec<Posting> {
     posting_list
 }
 
-pub (crate) fn vb_encode_posting_list(posting_list: &Vec<Posting>) -> Vec<u8> {
+pub(crate) fn vb_encode_posting_list(posting_list: &Vec<Posting>) -> Vec<u8> {
     let mut posting_list_bytes: Vec<u8> = Vec::<u8>::new();
     let mut last_doc_id = 0;
     for posting in posting_list {

@@ -27,16 +27,16 @@ impl MapInMemoryDict {
             term_map: HashMap::new(),
         };
     }
-    pub fn add_term(&mut self, term: &str, block_ids: Vec<u32>, term_frequency: u32, term_id: u32) {
-        self.term_map.insert(
-            term.to_string(),
-            MapInMemoryDictPointer {
-                term_id,
-                term_frequency,
-                block_ids,
-            },
-        );
-    }
+    // pub fn add_term(&mut self, term: &str, block_ids: Vec<u32>, term_frequency: u32, term_id: u32) {
+    //     self.term_map.insert(
+    //         term.to_string(),
+    //         MapInMemoryDictPointer {
+    //             term_id,
+    //             term_frequency,
+    //             block_ids,
+    //         },
+    //     );
+    // }
 
     pub fn get_terms(&self) -> Vec<String> {
         let mut keys = Vec::new();
