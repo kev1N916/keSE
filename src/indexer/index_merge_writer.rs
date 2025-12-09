@@ -101,6 +101,10 @@ impl MergedIndexBlockWriter {
         self.write_block_to_index_file()
     }
 
+    pub fn close(&mut self) -> io::Result<()> {
+        self.finish()
+    }
+
     fn add_block_to_term_metadata(&mut self, term: u32, block_no: u32) {
         if let Some(metadata) = self.term_metadata.get_mut(&term) {
             metadata.add_block_id(block_no);

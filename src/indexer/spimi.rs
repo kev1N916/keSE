@@ -96,6 +96,7 @@ impl Spmi {
             in_memory_index_metadata.add_term_to_bk_tree(term);
         }
 
+        index_merge_writer.close()?;
         for term in in_memory_index_metadata.get_all_terms() {
             let term_id = in_memory_index_metadata.get_term_id(term.clone());
             if term_id != 0 {
@@ -106,7 +107,6 @@ impl Spmi {
                 }
             }
         }
-
         // for doc_id in 1..doc_lengths.len() + 1 {
         //     let mut doc_length: f32 = 0.0;
         //     if let Some(tf_idfs) = doc_lengths.get(&(doc_id as u32)) {

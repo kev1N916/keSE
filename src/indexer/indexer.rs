@@ -50,6 +50,7 @@ pub struct DocumentMetadata {
 }
 pub struct Indexer {
     doc_id: u32,
+    // inverted_index:File,
     document_metadata: HashMap<u32, DocumentMetadata>,
     index_metadata: InMemoryIndexMetatdata,
     index_directory_path: String,
@@ -69,7 +70,10 @@ fn extract_plaintext(text: &Vec<Vec<String>>) -> String {
     tag_regex.replace_all(&full_text, "").to_string()
 }
 impl Indexer {
-    pub fn new(search_tokenizer: SearchTokenizer) -> Result<Self, std::io::Error> {
+    pub fn new(
+        search_tokenizer: SearchTokenizer,
+        // inverted_index_file: File,
+    ) -> Result<Self, std::io::Error> {
         // let search_tokenizer = SearchTokenizer::new()?;
         Ok(Self {
             doc_id: 0,
@@ -78,7 +82,7 @@ impl Indexer {
             // term_sender: tx,
             // term_receiver: rx,
             index_directory_path: String::new(),
-            search_tokenizer: search_tokenizer,
+            search_tokenizer,
         })
     }
 
@@ -211,5 +215,9 @@ impl Indexer {
 
     pub fn get_term_metadata(&self, term: &str) -> &MapInMemoryDictPointer {
         self.index_metadata.get_term_metadata(term)
+    }
+
+    pub fn get_doc_metadata(&self, doc_id: u32) -> Option<&DocumentMetadata> {
+        self.document_metadata.get(&doc_id)
     }
 }

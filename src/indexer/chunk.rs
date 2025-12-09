@@ -9,9 +9,91 @@ pub struct Chunk {
     pub max_doc_id: u32,    // stored on disk
     pub doc_ids: Vec<u8>,   // stored on disk
     pub positions: Vec<u8>, // stored on disk
+    pub indexed_positions: Vec<Vec<u8>>,
+    pub decoded_doc_ids: Vec<u32>,
     pub no_of_postings: u8,
     pub term: u32,
     pub last_doc_id: u32,
+}
+
+pub struct ChunkIterator {
+    pub chunks: Vec<Chunk>,
+    pub current_chunk_index: usize,
+    pub current_doc_id_index: usize,
+    pub decoded_doc_ids: Vec<u32>,
+}
+
+impl ChunkIterator {
+    pub fn new(chunks: Vec<Chunk>) -> Self {
+        Self {
+            chunks,
+            current_chunk_index: 0,
+            current_doc_id_index: 0,
+            decoded_doc_ids: Vec::new(),
+        }
+    }
+    pub fn init(&mut self) {
+        self.decoded_doc_ids = self.chunks[self.current_chunk_index].get_doc_ids();
+        self.current_doc_id_index = 0;
+    }
+    pub fn get_no_of_postings(&self) -> u32 {
+        self.chunks.iter().map(|c| c.no_of_postings as u32).sum()
+    }
+    pub fn contains_doc_id(&self, doc_id: u32) -> bool {
+        self.decoded_doc_ids.contains(&doc_id)
+    }
+
+    pub fn advance(&mut self, doc_id: u32) -> bool {
+        while self.current_chunk_index + 1 < self.chunks.len()
+            && doc_id > self.chunks[self.current_chunk_index].max_doc_id
+        {
+            self.current_chunk_index += 1;
+        }
+
+        if doc_id > self.chunks[self.current_chunk_index].max_doc_id {
+            self.init();
+            return true;
+        }
+        return false;
+    }
+
+    pub fn next(&mut self) -> bool {
+        if self.current_doc_id_index + 1 < self.decoded_doc_ids.len() {
+            self.current_doc_id_index += 1;
+            return true;
+        } else {
+            if self.current_chunk_index + 1 < self.chunks.len() {
+                self.current_chunk_index += 1;
+                self.init();
+                return true;
+            } else {
+                return false;
+            }
+        }
+    }
+
+    pub fn has_next(&mut self) -> bool {
+        if self.current_doc_id_index + 1 < self.decoded_doc_ids.len() {
+            return true;
+        } else {
+            if self.current_chunk_index + 1 < self.chunks.len() {
+                return true;
+            } else {
+                return false;
+            }
+        }
+    }
+
+    pub fn get_doc_id(&self) -> u32 {
+        self.decoded_doc_ids[self.current_doc_id_index]
+    }
+    pub fn get_doc_score(&self) -> f32 {
+        0.0
+        // self.decoded_doc_ids[self.current_doc_id_index]
+    }
+    pub fn get_posting_list(&self) -> Vec<u32> {
+        self.chunks[self.current_chunk_index].get_posting_list(self.current_doc_id_index)
+    }
 }
 
 impl Chunk {
@@ -21,8 +103,10 @@ impl Chunk {
             max_doc_id: 0,
             last_doc_id: 0,
             no_of_postings: 0,
-            term: term,
+            term,
             doc_ids: Vec::new(),
+            indexed_positions: Vec::new(),
+            decoded_doc_ids: Vec::new(),
             positions: Vec::new(),
         }
     }
@@ -30,12 +114,12 @@ impl Chunk {
     pub fn finish(&mut self) {
         if self.doc_ids.len() > 0 {
             self.doc_ids.push(POSITIONS_DELIMITER);
-            self.size_of_chunk+=1;
+            self.size_of_chunk += 1;
         }
     }
-  
+
     pub fn reset(&mut self) {
-        self.size_of_chunk = 8;
+        self.size_of_chunk = 9;
         self.last_doc_id = 0;
         self.max_doc_id = 0;
         self.positions.clear();
@@ -46,42 +130,50 @@ impl Chunk {
     pub fn encode(&self) -> Vec<u8> {
         let mut chunk_bytes: Vec<u8> = Vec::new();
         chunk_bytes.extend_from_slice(&self.size_of_chunk.to_le_bytes());
+        chunk_bytes.extend_from_slice(&self.no_of_postings.to_le_bytes());
         chunk_bytes.extend_from_slice(&self.max_doc_id.to_le_bytes());
         chunk_bytes.extend(&self.doc_ids);
         chunk_bytes.extend(&self.positions);
         chunk_bytes
     }
 
-    pub fn get_doc_ids(& self)->Vec<u32>{
+    pub fn get_doc_ids(&self) -> Vec<u32> {
         vb_decode_positions(&self.doc_ids)
-    } 
-    pub fn get_posting_list(& self,index:u32)->Vec<u32>{
-       
-       let mut posting_list: &[u8] = &[];
-        let mut current_index=0;
-        let mut i=0;
-        while current_index<index+1{
-            let mut j=i;
-            while self.positions[j]!=0{
-                j+=1;
+    }
+
+    pub fn decode_doc_ids(&mut self) {
+        self.decoded_doc_ids = vb_decode_positions(&self.doc_ids);
+    }
+
+    pub fn index_positions(&mut self) {
+        let mut posting_list: &[u8] = &[];
+        let mut i = 0;
+        while i < self.positions.len() {
+            let mut j = i;
+            while self.positions[j] != 0 {
+                j += 1;
             }
-            posting_list=&self.positions[i as usize..j as usize];
-            i=j+1;
-            current_index+=1;
+            posting_list = &self.positions[i as usize..j as usize];
+            i = j + 1;
+            self.indexed_positions.push(posting_list.to_vec());
         }
-        vb_decode_positions(posting_list)
+        self.positions.clear();
+    }
+    pub fn get_posting_list(&self, index: usize) -> Vec<u32> {
+        vb_decode_positions(&self.indexed_positions[index as usize])
     }
 
     pub fn decode(&mut self, chunk_bytes: &[u8]) {
         self.size_of_chunk = (4 + chunk_bytes.len()) as u32;
         let mut offset = 0;
-        let max_doc_id = u32::from_le_bytes(chunk_bytes[offset..offset + 4].try_into().unwrap());
-        offset += 4;
-        self.max_doc_id = max_doc_id;
-        println!("size of chunk {} max doc id {}",self.size_of_chunk,self.max_doc_id);
-        if max_doc_id == 0 {
+        self.no_of_postings =
+            u8::from_le_bytes(chunk_bytes[offset..offset + 1].try_into().unwrap());
+        if self.no_of_postings == 0 {
             return;
         }
+        offset += 1;
+        self.max_doc_id = u32::from_le_bytes(chunk_bytes[offset..offset + 4].try_into().unwrap());
+        offset += 4;
         let mut index = offset;
         while index < chunk_bytes.len() {
             if chunk_bytes[index] == 0 {
@@ -90,7 +182,8 @@ impl Chunk {
             index += 1;
         }
         self.doc_ids = chunk_bytes[offset..index].to_vec();
-        self.positions = chunk_bytes[index+1..].to_vec();
+        self.positions = chunk_bytes[index + 1..].to_vec();
+        self.index_positions();
     }
     pub fn add_encoded_doc_id(&mut self, doc_id: u32, encoded_doc_id: Vec<u8>) {
         self.last_doc_id = doc_id;
