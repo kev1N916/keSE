@@ -17,7 +17,7 @@ pub struct IndexMergeIterator {
 impl IndexMergeIterator {
     pub fn new(file: File) -> IndexMergeIterator {
         IndexMergeIterator {
-            file: file,
+            file,
             no_of_terms: 0,
             current_term_no: 0,
             current_term: None,
@@ -84,7 +84,7 @@ impl IndexMergeIterator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{dictionary::Posting, indexer::helper::{vb_encode_positions, vb_encode_posting_list}};
+    use crate::{dictionary::Posting, indexer::helper::vb_encode_posting_list};
     use std::io::{Seek, Write};
     use tempfile::NamedTempFile;
 
@@ -100,7 +100,8 @@ mod tests {
             file.write_all(&(term.len() as u32).to_le_bytes()).unwrap();
             file.write_all(term.as_bytes()).unwrap();
             let encoded_posting_list = vb_encode_posting_list(&postings);
-            file.write_all(&(encoded_posting_list.len() as u32).to_le_bytes()).unwrap();
+            file.write_all(&(encoded_posting_list.len() as u32).to_le_bytes())
+                .unwrap();
             file.write_all(&encoded_posting_list).unwrap();
         }
 
@@ -112,16 +113,22 @@ mod tests {
     #[test]
     fn test_init_and_single_term() {
         let postings = vec![
-            Posting { doc_id: 1, positions: vec![5, 10, 15] },
-            Posting { doc_id: 3, positions: vec![2, 8] },
+            Posting {
+                doc_id: 1,
+                positions: vec![5, 10, 15],
+            },
+            Posting {
+                doc_id: 3,
+                positions: vec![2, 8],
+            },
         ];
-        
+
         let temp_file = create_test_index_file(vec![("apple", postings.clone())]);
         let file = temp_file.reopen().unwrap();
         let mut iterator = IndexMergeIterator::new(file);
-        
+
         iterator.init().unwrap();
-        
+
         assert_eq!(iterator.no_of_terms, 1);
         assert_eq!(iterator.current_term_no, 1);
         assert_eq!(iterator.current_term, Some("apple".to_string()));
@@ -130,35 +137,44 @@ mod tests {
 
     #[test]
     fn test_iterate_multiple_terms() {
-        let postings1 = vec![Posting { doc_id: 1, positions: vec![3, 7] }];
-        let postings2 = vec![Posting { doc_id: 2, positions: vec![1] }];
-        let postings3 = vec![Posting { doc_id: 5, positions: vec![7, 14, 21] }];
-        
+        let postings1 = vec![Posting {
+            doc_id: 1,
+            positions: vec![3, 7],
+        }];
+        let postings2 = vec![Posting {
+            doc_id: 2,
+            positions: vec![1],
+        }];
+        let postings3 = vec![Posting {
+            doc_id: 5,
+            positions: vec![7, 14, 21],
+        }];
+
         let temp_file = create_test_index_file(vec![
             ("apple", postings1),
             ("banana", postings2),
             ("cherry", postings3),
         ]);
-        
+
         let file = temp_file.reopen().unwrap();
         let mut iterator = IndexMergeIterator::new(file);
-        
+
         iterator.init().unwrap();
-        
+
         // First term (automatically loaded by init)
         assert_eq!(iterator.current_term, Some("apple".to_string()));
         assert_eq!(iterator.get_current_term(), 1);
-        
+
         // Second term
         assert!(iterator.next().unwrap());
         assert_eq!(iterator.current_term, Some("banana".to_string()));
         assert_eq!(iterator.get_current_term(), 2);
-        
+
         // Third term
         assert!(iterator.next().unwrap());
         assert_eq!(iterator.current_term, Some("cherry".to_string()));
         assert_eq!(iterator.get_current_term(), 3);
-        
+
         // No more terms
         assert!(!iterator.next().unwrap());
         assert!(iterator.current_term.is_none());
@@ -170,9 +186,9 @@ mod tests {
         let temp_file = create_test_index_file(vec![]);
         let file = temp_file.reopen().unwrap();
         let mut iterator = IndexMergeIterator::new(file);
-        
+
         iterator.init().unwrap();
-        
+
         assert_eq!(iterator.no_of_terms, 0);
         assert!(iterator.current_term.is_none());
         assert!(iterator.current_postings.is_none());
@@ -181,13 +197,13 @@ mod tests {
     #[test]
     fn test_term_with_empty_postings() {
         let postings = vec![];
-        
+
         let temp_file = create_test_index_file(vec![("empty", postings)]);
         let file = temp_file.reopen().unwrap();
         let mut iterator = IndexMergeIterator::new(file);
-        
+
         iterator.init().unwrap();
-        
+
         assert_eq!(iterator.current_term, Some("empty".to_string()));
         assert_eq!(iterator.current_postings.as_ref().unwrap().len(), 0);
     }
@@ -195,18 +211,30 @@ mod tests {
     #[test]
     fn test_term_with_multiple_postings() {
         let postings = vec![
-            Posting { doc_id: 1, positions: vec![10, 20] },
-            Posting { doc_id: 5, positions: vec![3, 7, 11] },
-            Posting { doc_id: 10, positions: vec![1] },
-            Posting { doc_id: 15, positions: vec![20, 40, 60, 80] },
+            Posting {
+                doc_id: 1,
+                positions: vec![10, 20],
+            },
+            Posting {
+                doc_id: 5,
+                positions: vec![3, 7, 11],
+            },
+            Posting {
+                doc_id: 10,
+                positions: vec![1],
+            },
+            Posting {
+                doc_id: 15,
+                positions: vec![20, 40, 60, 80],
+            },
         ];
-        
+
         let temp_file = create_test_index_file(vec![("test", postings.clone())]);
         let file = temp_file.reopen().unwrap();
         let mut iterator = IndexMergeIterator::new(file);
-        
+
         iterator.init().unwrap();
-        
+
         assert_eq!(iterator.current_term, Some("test".to_string()));
         let current_postings = iterator.current_postings.as_ref().unwrap();
         assert_eq!(current_postings.len(), 4);
@@ -218,67 +246,77 @@ mod tests {
 
     #[test]
     fn test_unicode_term() {
-        let postings = vec![Posting { doc_id: 1, positions: vec![1] }];
-        
+        let postings = vec![Posting {
+            doc_id: 1,
+            positions: vec![1],
+        }];
+
         let temp_file = create_test_index_file(vec![("café", postings)]);
         let file = temp_file.reopen().unwrap();
         let mut iterator = IndexMergeIterator::new(file);
-        
+
         iterator.init().unwrap();
-        
+
         assert_eq!(iterator.current_term, Some("café".to_string()));
     }
 
     #[test]
     fn test_long_term_name() {
         let long_term = "a".repeat(1000);
-        let postings = vec![Posting { doc_id: 1, positions: vec![1] }];
-        
+        let postings = vec![Posting {
+            doc_id: 1,
+            positions: vec![1],
+        }];
+
         let temp_file = create_test_index_file(vec![(&long_term, postings)]);
         let file = temp_file.reopen().unwrap();
         let mut iterator = IndexMergeIterator::new(file);
-        
+
         iterator.init().unwrap();
-        
+
         assert_eq!(iterator.current_term, Some(long_term));
     }
 
     #[test]
     fn test_offset_tracking() {
-        let postings = vec![Posting { doc_id: 1, positions: vec![2, 4] }];
-        
-        let temp_file = create_test_index_file(vec![
-            ("a", postings.clone()),
-            ("b", postings.clone()),
-        ]);
-        
+        let postings = vec![Posting {
+            doc_id: 1,
+            positions: vec![2, 4],
+        }];
+
+        let temp_file =
+            create_test_index_file(vec![("a", postings.clone()), ("b", postings.clone())]);
+
         let file = temp_file.reopen().unwrap();
         let mut iterator = IndexMergeIterator::new(file);
-        
+
         iterator.init().unwrap();
-        
+
         let offset_after_first = iterator.current_offset;
         assert!(offset_after_first > 4); // Should be past the header
-        
+
         iterator.next().unwrap();
         assert!(iterator.current_offset > offset_after_first);
     }
 
     #[test]
     fn test_next_beyond_end() {
-        let postings = vec![Posting { doc_id: 1, positions: vec![1] }];
-        
+        let postings = vec![Posting {
+            doc_id: 1,
+            positions: vec![1],
+        }];
+
         let temp_file = create_test_index_file(vec![("single", postings)]);
         let file = temp_file.reopen().unwrap();
         let mut iterator = IndexMergeIterator::new(file);
-        
+
         iterator.init().unwrap();
-        
+
         // Try to iterate past the end multiple times
         assert!(!iterator.next().unwrap());
         assert!(!iterator.next().unwrap());
         assert!(!iterator.next().unwrap());
-        
+
         // Should remain None
         assert!(iterator.current_term.is_none());
         assert!(iterator.current_postings.is_none());
@@ -286,19 +324,17 @@ mod tests {
 
     #[test]
     fn test_posting_with_many_positions() {
-        let postings = vec![
-            Posting { 
-                doc_id: 42, 
-                positions: vec![1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50] 
-            }
-        ];
-        
+        let postings = vec![Posting {
+            doc_id: 42,
+            positions: vec![1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50],
+        }];
+
         let temp_file = create_test_index_file(vec![("frequent", postings.clone())]);
         let file = temp_file.reopen().unwrap();
         let mut iterator = IndexMergeIterator::new(file);
-        
+
         iterator.init().unwrap();
-        
+
         assert_eq!(iterator.current_term, Some("frequent".to_string()));
         let current_postings = iterator.current_postings.as_ref().unwrap();
         assert_eq!(current_postings.len(), 1);
@@ -310,14 +346,17 @@ mod tests {
 
     #[test]
     fn test_posting_with_no_positions() {
-        let postings = vec![Posting { doc_id: 10, positions: vec![] }];
-        
+        let postings = vec![Posting {
+            doc_id: 10,
+            positions: vec![],
+        }];
+
         let temp_file = create_test_index_file(vec![("rare", postings)]);
         let file = temp_file.reopen().unwrap();
         let mut iterator = IndexMergeIterator::new(file);
-        
+
         iterator.init().unwrap();
-        
+
         assert_eq!(iterator.current_term, Some("rare".to_string()));
         let current_postings = iterator.current_postings.as_ref().unwrap();
         assert_eq!(current_postings.len(), 1);

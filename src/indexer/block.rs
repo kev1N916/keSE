@@ -23,7 +23,7 @@ impl Block {
         Self {
             current_block_size: 4,
             no_of_terms: 0,
-            block_id: block_id,
+            block_id,
             current_chunk: Chunk::new(0),
             chunks: Vec::new(),
             block_bytes: [0; BLOCK_SIZE],
@@ -187,7 +187,7 @@ mod tests {
     fn test_add_single_term_small_postings() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer = MergedIndexBlockWriter::new(file, Some(64));
+        let mut writer = MergedIndexBlockWriter::new(file, Some(64), true);
 
         let postings = vec![
             create_test_postings(10, vec![5, 10, 15]),
@@ -212,7 +212,7 @@ mod tests {
     fn test_add_multiple_terms() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer = MergedIndexBlockWriter::new(file, Some(64));
+        let mut writer = MergedIndexBlockWriter::new(file, Some(64), true);
 
         let postings1 = vec![create_test_postings(10, vec![1])];
         let postings2 = vec![create_test_postings(20, vec![2])];
@@ -235,7 +235,7 @@ mod tests {
     fn test_multiple_blocks_same_term() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer = MergedIndexBlockWriter::new(file, Some(64));
+        let mut writer = MergedIndexBlockWriter::new(file, Some(64), true);
 
         let postings = vec![
             create_test_postings(10, vec![5, 10, 15]),
@@ -260,7 +260,7 @@ mod tests {
     fn test_sparse_doc_ids() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer = MergedIndexBlockWriter::new(file, Some(64));
+        let mut writer = MergedIndexBlockWriter::new(file, Some(64), true);
 
         let postings1 = vec![
             create_test_postings(10, vec![1, 6, 7, 13, 20]),
@@ -313,7 +313,7 @@ mod tests {
     fn test_multiple_blocks_same_term_2() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer = MergedIndexBlockWriter::new(file, Some(1)); // Very small blocks
+        let mut writer = MergedIndexBlockWriter::new(file, Some(1), true); // Very small blocks
 
         // Create enough postings to span multiple blocks
         let mut postings = Vec::new();

@@ -1,18 +1,19 @@
 use std::{
+    collections::HashMap,
     fs::{self, File},
-    io::{self, BufReader, BufWriter, Read, Write},
+    io::{self, BufWriter, Write},
     sync::mpsc,
 };
 
 use crate::{
     dictionary::{Dictionary, Posting, Term},
     indexer::{
-        helper::{vb_decode_posting_list, vb_encode_posting_list},
-        index_merge_iterator::IndexMergeIterator,
-        index_merge_writer::MergedIndexBlockWriter,
-        index_metadata::InMemoryIndexMetatdata,
+        helper::vb_encode_posting_list, index_merge_iterator::IndexMergeIterator,
+        index_merge_writer::MergedIndexBlockWriter, index_metadata::InMemoryIndexMetatdata,
+        indexer::DocumentMetadata,
     },
     positional_intersect::merge_postings,
+    scoring::bm_25::{BM25Params, compute_term_score},
 };
 
 pub struct Spmi {
@@ -43,12 +44,15 @@ impl Spmi {
         }
         let sorted_terms = self.dictionary.sort_terms();
         self.write_dictionary_to_disk("", &sorted_terms, &self.dictionary)?;
-
         Ok(())
     }
 
     pub fn merge_index_files(
         &mut self,
+        l_avg: f32,
+        n: u32,
+        include_positions: bool,
+        document_metadata: &HashMap<u32, DocumentMetadata>,
         block_size: u8,
     ) -> Result<InMemoryIndexMetatdata, io::Error> {
         let mut in_memory_index_metadata: InMemoryIndexMetatdata = InMemoryIndexMetatdata::new();
@@ -59,7 +63,8 @@ impl Spmi {
         }
         let mut no_of_terms: u32 = 0;
         let mut index_merge_writer: MergedIndexBlockWriter =
-            MergedIndexBlockWriter::new(final_index_file, Some(block_size));
+            MergedIndexBlockWriter::new(final_index_file, Some(block_size), include_positions);
+        let params = BM25Params::default();
         loop {
             // Find the smallest current term among all iterators that still have terms
             let smallest_term = merge_iterators
@@ -91,8 +96,17 @@ impl Spmi {
             for postings in posting_lists {
                 final_merged = merge_postings(&final_merged, &postings);
             }
+            let f_t = final_merged.len() as u32;
+            let mut max_term_score: f32 = 0.0;
+            for posting in &final_merged {
+                let f_dt = posting.positions.len() as u32;
+                let l_d = document_metadata.get(&posting.doc_id).unwrap().doc_length;
+                let term_score: f32 = compute_term_score(f_dt, l_d, l_avg, n, f_t, &params);
+                max_term_score = max_term_score.max(term_score);
+            }
             index_merge_writer.add_term(no_of_terms, final_merged)?;
             in_memory_index_metadata.set_term_id(&term, no_of_terms);
+            in_memory_index_metadata.set_max_term_score(&term, max_term_score);
             in_memory_index_metadata.add_term_to_bk_tree(term);
         }
 
@@ -107,16 +121,6 @@ impl Spmi {
                 }
             }
         }
-        // for doc_id in 1..doc_lengths.len() + 1 {
-        //     let mut doc_length: f32 = 0.0;
-        //     if let Some(tf_idfs) = doc_lengths.get(&(doc_id as u32)) {
-        //         for tf_idf in tf_idfs {
-        //             doc_length = doc_length + (tf_idf * tf_idf);
-        //         }
-        //     }
-        //     doc_lengths_final.push(doc_length.sqrt());
-        // }
-
         Ok(in_memory_index_metadata)
     }
 

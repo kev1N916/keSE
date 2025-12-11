@@ -99,7 +99,7 @@ impl ChunkIterator {
 impl Chunk {
     pub fn new(term: u32) -> Self {
         Self {
-            size_of_chunk: 8,
+            size_of_chunk: 9,
             max_doc_id: 0,
             last_doc_id: 0,
             no_of_postings: 0,
@@ -146,6 +146,9 @@ impl Chunk {
     }
 
     pub fn index_positions(&mut self) {
+        if self.positions.len() == 0 {
+            return;
+        }
         let mut posting_list: &[u8] = &[];
         let mut i = 0;
         while i < self.positions.len() {
@@ -160,7 +163,7 @@ impl Chunk {
         self.positions.clear();
     }
     pub fn get_posting_list(&self, index: usize) -> Vec<u32> {
-        vb_decode_positions(&self.indexed_positions[index as usize])
+        vb_decode_positions(&self.indexed_positions[index])
     }
 
     pub fn decode(&mut self, chunk_bytes: &[u8]) {

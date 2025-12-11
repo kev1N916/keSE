@@ -8,12 +8,12 @@ pub struct TermIterator {
 }
 
 impl TermIterator {
-    pub fn new(term: String, term_id: u32, chunks: Vec<Chunk>) -> Self {
+    pub fn new(term: String, term_id: u32, chunks: Vec<Chunk>, max_score: f32) -> Self {
         Self {
             term,
             chunk_iterator: ChunkIterator::new(chunks),
             term_id,
-            max_score: 0.0,
+            max_score,
         }
     }
 

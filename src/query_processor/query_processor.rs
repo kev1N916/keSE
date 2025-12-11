@@ -122,6 +122,7 @@ impl QueryProcessor {
                 query_terms[i].clone(),
                 query_metadata[i].term_id,
                 chunks,
+                query_metadata[i].max_score,
             ));
         }
 

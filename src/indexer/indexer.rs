@@ -1,11 +1,3 @@
-use std::{
-    collections::HashMap,
-    fs::{self, File},
-    io::{self, BufReader},
-    path::Path,
-    sync::mpsc::{self},
-};
-
 use crate::{
     dictionary::{Posting, Term},
     in_memory_dict::map_in_memory_dict::{MapInMemoryDict, MapInMemoryDictPointer},
@@ -14,8 +6,16 @@ use crate::{
     query_parser::tokenizer::SearchTokenizer,
 };
 use bzip2::read::BzDecoder;
+use pdf_oxide::PdfDocument;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::{
+    collections::HashMap,
+    fs::File,
+    io::{self, BufReader},
+    path::Path,
+    sync::mpsc::{self},
+};
 
 // Define the structure matching your JSON format
 #[derive(Debug, Deserialize, Serialize)]
@@ -49,8 +49,9 @@ pub struct DocumentMetadata {
     pub doc_length: u32,
 }
 pub struct Indexer {
+    l_avg: f32,
     doc_id: u32,
-    // inverted_index:File,
+    include_positions: bool,
     document_metadata: HashMap<u32, DocumentMetadata>,
     index_metadata: InMemoryIndexMetatdata,
     index_directory_path: String,
@@ -76,7 +77,9 @@ impl Indexer {
     ) -> Result<Self, std::io::Error> {
         // let search_tokenizer = SearchTokenizer::new()?;
         Ok(Self {
+            l_avg: 0.0,
             doc_id: 0,
+            include_positions: false,
             document_metadata: HashMap::new(),
             index_metadata: InMemoryIndexMetatdata::new(),
             // term_sender: tx,
@@ -147,28 +150,6 @@ impl Indexer {
         Ok(())
     }
 
-    fn scan_index_directory(&self, directory: &str) -> Result<Vec<File>, io::Error> {
-        let mut file_handles = Vec::new();
-
-        let entries = fs::read_dir(directory)?;
-
-        for entry in entries {
-            let entry = entry?;
-            let path = entry.path();
-
-            if path.is_file() {
-                if let Some(extension) = path.extension() {
-                    if extension == "txt" {
-                        let file = File::open(&path)?;
-                        file_handles.push(file);
-                    }
-                }
-            }
-        }
-
-        Ok(file_handles)
-    }
-
     fn process_directory(
         &mut self,
         dir_path: &Path,
@@ -185,6 +166,8 @@ impl Indexer {
             } else if path.extension().and_then(|s| s.to_str()) == Some("bz2") {
                 println!("Processing: {:?}", path);
                 self.read_bz2_file(&path, tx)?;
+            } else if path.extension().and_then(|s| s.to_str()) == Some("pdf") {
+                println!("Processing: {:?}", path);
             }
         }
 
@@ -203,12 +186,26 @@ impl Indexer {
         });
 
         let wiki_dir = Path::new("enwiki-20171001-pages-meta-current-withlinks-processed");
-        let _ = self.process_directory(wiki_dir, &tx);
+        let pdf_dir = Path::new("pdfs");
+
+        let _ = self.process_directory(pdf_dir, &tx);
         drop(tx);
         handle.join().unwrap();
-
+        let mut l_avg = 0;
+        for doc in &self.document_metadata {
+            l_avg += doc.1.doc_length;
+        }
+        self.l_avg = ((l_avg as f64) / (self.doc_id as f64)) as f32;
         spmi = Spmi::new();
-        let result = spmi.merge_index_files(64).unwrap();
+        let result = spmi
+            .merge_index_files(
+                self.l_avg,
+                self.doc_id,
+                self.include_positions,
+                &self.document_metadata,
+                64,
+            )
+            .unwrap();
         self.index_metadata = result;
         Ok(())
     }
@@ -219,5 +216,28 @@ impl Indexer {
 
     pub fn get_doc_metadata(&self, doc_id: u32) -> Option<&DocumentMetadata> {
         self.document_metadata.get(&doc_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new_writer() {
+        let pdf_dir = Path::new("pdfs");
+        let search_tokenizer = SearchTokenizer::new().unwrap();
+        for entry in std::fs::read_dir(pdf_dir).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("pdf") {
+                let mut doc = PdfDocument::open(path).unwrap();
+                let text = doc.extract_text(1).unwrap();
+                let tokens = search_tokenizer.tokenize(text);
+                for token in tokens {
+                    println!("{}", token.word);
+                }
+            }
+        }
     }
 }

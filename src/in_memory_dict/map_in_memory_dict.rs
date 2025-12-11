@@ -4,6 +4,7 @@ use std::collections::HashMap;
 pub struct MapInMemoryDictPointer {
     pub term_id: u32,
     pub term_frequency: u32,
+    pub max_score: f32,
     pub block_ids: Vec<u32>,
 }
 
@@ -12,6 +13,7 @@ impl MapInMemoryDictPointer {
         Self {
             term_id,
             term_frequency: 0,
+            max_score: 0.0,
             block_ids: Vec::new(),
         }
     }
@@ -27,16 +29,6 @@ impl MapInMemoryDict {
             term_map: HashMap::new(),
         };
     }
-    // pub fn add_term(&mut self, term: &str, block_ids: Vec<u32>, term_frequency: u32, term_id: u32) {
-    //     self.term_map.insert(
-    //         term.to_string(),
-    //         MapInMemoryDictPointer {
-    //             term_id,
-    //             term_frequency,
-    //             block_ids,
-    //         },
-    //     );
-    // }
 
     pub fn get_terms(&self) -> Vec<String> {
         let mut keys = Vec::new();
@@ -54,7 +46,7 @@ impl MapInMemoryDict {
         }
     }
 
-    pub fn get_term_metadata(&self,term:&str)->&MapInMemoryDictPointer{
+    pub fn get_term_metadata(&self, term: &str) -> &MapInMemoryDictPointer {
         self.term_map.get(term).unwrap()
     }
 
@@ -66,6 +58,12 @@ impl MapInMemoryDict {
     pub fn set_term_frequency(&mut self, term: &str, term_frequency: u32) {
         if let Some(pointer) = self.term_map.get_mut(term) {
             pointer.term_frequency = term_frequency;
+        }
+    }
+
+    pub fn set_max_term_score(&mut self, term: &str, max_term_score: f32) {
+        if let Some(pointer) = self.term_map.get_mut(term) {
+            pointer.max_score = max_term_score;
         }
     }
 

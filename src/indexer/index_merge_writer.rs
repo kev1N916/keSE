@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fs::File,
     io::{self, BufWriter, Write},
 };
@@ -79,16 +79,18 @@ pub struct MergedIndexBlockWriter {
     pub term_metadata: HashMap<u32, TermMetadata>,
     pub current_block_no: u32,
     pub current_block: Block,
+    pub include_positions: bool,
     file_writer: BufWriter<File>,
     pub max_block_size: u8, // in kb
 }
 
 impl MergedIndexBlockWriter {
-    pub fn new(file: File, max_block_size: Option<u8>) -> Self {
+    pub fn new(file: File, max_block_size: Option<u8>, include_positions: bool) -> Self {
         Self {
             term_metadata: HashMap::new(),
             current_block_no: 0,
             current_block: Block::new(0),
+            include_positions,
             file_writer: BufWriter::new(file),
             max_block_size: match max_block_size {
                 Some(block_size) => block_size,
@@ -166,10 +168,13 @@ impl MergedIndexBlockWriter {
                 .current_block
                 .current_chunk
                 .encode_doc_id(current_posting.doc_id);
-            let encoded_positions = self
-                .current_block
-                .current_chunk
-                .encode_positions(&current_posting.positions);
+            let mut encoded_positions = Vec::new();
+            if self.include_positions {
+                encoded_positions = self
+                    .current_block
+                    .current_chunk
+                    .encode_positions(&current_posting.positions);
+            }
             let size_of_posting = encoded_doc_id.len() as u32 + encoded_positions.len() as u32;
             if (self.current_block.space_used() + size_of_posting)
                 > (self.max_block_size as u32 * 1000).into()
@@ -195,9 +200,11 @@ impl MergedIndexBlockWriter {
             self.current_block
                 .current_chunk
                 .add_encoded_doc_id(current_posting.doc_id, encoded_doc_id);
-            self.current_block
-                .current_chunk
-                .add_encoded_positions(encoded_positions);
+            if self.include_positions {
+                self.current_block
+                    .current_chunk
+                    .add_encoded_positions(encoded_positions);
+            }
             self.current_block.current_chunk.no_of_postings += 1;
             i += 1;
         }
@@ -229,7 +236,7 @@ mod tests {
     fn test_new_writer() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let writer = MergedIndexBlockWriter::new(file, None);
+        let writer = MergedIndexBlockWriter::new(file, None, true);
 
         assert_eq!(writer.term_metadata.len(), 0);
         assert_eq!(writer.current_block_no, 0);
@@ -240,7 +247,7 @@ mod tests {
     fn test_new_writer_with_custom_block_size() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let writer = MergedIndexBlockWriter::new(file, Some(128));
+        let writer = MergedIndexBlockWriter::new(file, Some(128), true);
 
         assert_eq!(writer.max_block_size, 128);
     }
@@ -249,7 +256,7 @@ mod tests {
     fn test_add_single_term_small_postings() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer = MergedIndexBlockWriter::new(file, Some(64));
+        let mut writer = MergedIndexBlockWriter::new(file, Some(64), true);
 
         let postings = vec![
             create_test_postings(10, vec![5, 10, 15]),
@@ -270,7 +277,7 @@ mod tests {
     fn test_add_multiple_terms() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer = MergedIndexBlockWriter::new(file, Some(64));
+        let mut writer = MergedIndexBlockWriter::new(file, Some(64), true);
 
         let postings1 = vec![create_test_postings(10, vec![1])];
         let postings2 = vec![create_test_postings(20, vec![2])];
@@ -292,7 +299,7 @@ mod tests {
     fn test_term_with_many_postings() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer = MergedIndexBlockWriter::new(file, Some(64));
+        let mut writer = MergedIndexBlockWriter::new(file, Some(64), true);
 
         // Create 150 postings to test chunk splitting (>128 postings per chunk)
         let mut postings = Vec::new();
@@ -312,7 +319,7 @@ mod tests {
     fn test_block_size_threshold_triggers_write() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer = MergedIndexBlockWriter::new(file, Some(1)); // Very small block size
+        let mut writer = MergedIndexBlockWriter::new(file, Some(1), true); // Very small block size
 
         let postings = vec![create_test_postings(10, vec![1, 2, 3, 4, 5])];
 
@@ -330,7 +337,7 @@ mod tests {
     fn test_empty_postings() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer = MergedIndexBlockWriter::new(file, Some(64));
+        let mut writer = MergedIndexBlockWriter::new(file, Some(64), true);
 
         let postings = vec![];
 
@@ -346,7 +353,7 @@ mod tests {
     fn test_postings_with_empty_positions() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer = MergedIndexBlockWriter::new(file, Some(64));
+        let mut writer = MergedIndexBlockWriter::new(file, Some(64), true);
 
         let postings = vec![
             create_test_postings(10, vec![]),
@@ -365,7 +372,7 @@ mod tests {
     fn test_postings_with_many_positions() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer = MergedIndexBlockWriter::new(file, Some(64));
+        let mut writer = MergedIndexBlockWriter::new(file, Some(64), true);
 
         // Create a posting with many positions
         let positions: Vec<u32> = (0..100).map(|i| i * 10).collect();
@@ -383,7 +390,7 @@ mod tests {
     fn test_multiple_blocks_same_term() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer = MergedIndexBlockWriter::new(file, Some(1)); // Very small blocks
+        let mut writer = MergedIndexBlockWriter::new(file, Some(1), true); // Very small blocks
 
         // Create enough postings to span multiple blocks
         let mut postings = Vec::new();
@@ -405,7 +412,7 @@ mod tests {
     fn test_sequential_doc_ids() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer = MergedIndexBlockWriter::new(file, Some(64));
+        let mut writer = MergedIndexBlockWriter::new(file, Some(64), true);
 
         let postings = vec![
             create_test_postings(1, vec![1]),
@@ -427,7 +434,7 @@ mod tests {
     fn test_sparse_doc_ids() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer = MergedIndexBlockWriter::new(file, Some(64));
+        let mut writer = MergedIndexBlockWriter::new(file, Some(64), true);
 
         let postings = vec![
             create_test_postings(10, vec![1]),
@@ -448,7 +455,7 @@ mod tests {
     fn test_file_written_correctly() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer = MergedIndexBlockWriter::new(file, Some(64));
+        let mut writer = MergedIndexBlockWriter::new(file, Some(64), true);
 
         let postings = vec![
             create_test_postings(10, vec![5, 10]),
@@ -495,7 +502,7 @@ mod tests {
     fn test_multiple_terms_different_sizes() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer = MergedIndexBlockWriter::new(file, Some(64));
+        let mut writer = MergedIndexBlockWriter::new(file, Some(64), true);
 
         // Term 1: Few postings
         writer
@@ -539,7 +546,7 @@ mod tests {
     fn test_large_doc_ids() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer = MergedIndexBlockWriter::new(file, Some(64));
+        let mut writer = MergedIndexBlockWriter::new(file, Some(64), true);
 
         let postings = vec![
             create_test_postings(u32::MAX - 1000, vec![1]),
@@ -559,7 +566,7 @@ mod tests {
     fn test_chunk_boundary_128_postings() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer = MergedIndexBlockWriter::new(file, Some(128));
+        let mut writer = MergedIndexBlockWriter::new(file, Some(128), true);
 
         // Exactly 128 postings - should fit in one chunk
         let postings: Vec<Posting> = (0..128).map(|i| create_test_postings(i, vec![1])).collect();
@@ -576,7 +583,7 @@ mod tests {
     fn test_chunk_boundary_129_postings() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer = MergedIndexBlockWriter::new(file, Some(128));
+        let mut writer = MergedIndexBlockWriter::new(file, Some(128), true);
 
         // 129 postings - should create multiple chunks
         let postings: Vec<Posting> = (0..129).map(|i| create_test_postings(i, vec![1])).collect();

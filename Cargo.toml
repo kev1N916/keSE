@@ -6,6 +6,8 @@ edition = "2024"
 [dependencies]
 bk-tree = "0.5.0"
 bzip2 = "0.6.1"
+pdf-extract = "0.10.0"
+pdf_oxide = "0.1.2"
 regex = "1.12.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
