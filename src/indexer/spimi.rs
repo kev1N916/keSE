@@ -6,6 +6,7 @@ use std::{
 };
 
 use crate::{
+    compressors::compressor::CompressionAlgorithm,
     dictionary::{Dictionary, Posting, Term},
     indexer::{
         helper::vb_encode_posting_list, index_merge_iterator::IndexMergeIterator,
@@ -53,6 +54,7 @@ impl Spmi {
         n: u32,
         include_positions: bool,
         document_metadata: &HashMap<u32, DocumentMetadata>,
+        compression_algorithm: CompressionAlgorithm,
         block_size: u8,
     ) -> Result<InMemoryIndexMetatdata, io::Error> {
         let mut in_memory_index_metadata: InMemoryIndexMetatdata = InMemoryIndexMetatdata::new();
@@ -62,8 +64,12 @@ impl Spmi {
             return Ok(in_memory_index_metadata);
         }
         let mut no_of_terms: u32 = 0;
-        let mut index_merge_writer: MergedIndexBlockWriter =
-            MergedIndexBlockWriter::new(final_index_file, Some(block_size), include_positions);
+        let mut index_merge_writer: MergedIndexBlockWriter = MergedIndexBlockWriter::new(
+            final_index_file,
+            Some(block_size),
+            include_positions,
+            compression_algorithm,
+        );
         let params = BM25Params::default();
         loop {
             // Find the smallest current term among all iterators that still have terms

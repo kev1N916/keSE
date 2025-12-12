@@ -6,20 +6,23 @@ use std::{
 };
 
 use crate::{
+    compressors::compressor::CompressionAlgorithm,
     in_memory_dict::map_in_memory_dict::MapInMemoryDictPointer,
-    indexer::{block::Block, indexer::DocumentMetadata},
+    indexer::block::Block,
     query_processor::{algos::wand::wand, term_iterator::TermIterator},
 };
 
 pub struct QueryProcessor {
     inverted_index_file: File,
+    compression_algorithm: CompressionAlgorithm,
 }
 
 impl QueryProcessor {
-    pub fn new() -> io::Result<Self> {
+    pub fn new(compression_algorithm: CompressionAlgorithm) -> io::Result<Self> {
         let inverted_index_file = File::open("final.idx")?;
         Ok(Self {
             inverted_index_file,
+            compression_algorithm,
         })
     }
 
@@ -31,7 +34,11 @@ impl QueryProcessor {
             let mut block = Block::new(block_ids[i]);
             block.init(&mut reader).unwrap();
             let term_index = block.check_if_term_exists(term_id);
-            let chunks = block.decode_chunks_for_term(term_id, term_index as usize);
+            let chunks = block.decode_chunks_for_term(
+                term_id,
+                term_index as usize,
+                self.compression_algorithm.clone(),
+            );
             for chunk in chunks {
                 doc_ids.extend(&mut chunk.get_doc_ids().into_iter());
             }
@@ -48,7 +55,11 @@ impl QueryProcessor {
             if term_index == -1 {
                 continue;
             }
-            let chunks = block.decode_chunks_for_term(term_id, term_index as usize);
+            let chunks = block.decode_chunks_for_term(
+                term_id,
+                term_index as usize,
+                self.compression_algorithm.clone(),
+            );
 
             doc_ids.retain(|doc_id| {
                 if let Some(chunk) = block.get_chunk_for_doc(*doc_id, &chunks) {
@@ -60,36 +71,6 @@ impl QueryProcessor {
             });
         }
     }
-
-    pub fn score_docs(&mut self, doc_metadata: &HashMap<u32, DocumentMetadata>) {}
-    // pub fn process_query(
-    //     &mut self,
-    //     query_terms: Vec<String>,
-    //     query_metadata: Vec<&MapInMemoryDictPointer>,
-    // ) {
-    //     let mut min_frequency_term_index = query_terms.len();
-    //     let mut min_doc_frequency = u32::MAX;
-    //     for i in 0..query_metadata.len() {
-    //         if query_metadata[i].term_frequency < min_doc_frequency {
-    //             min_frequency_term_index = i;
-    //             min_doc_frequency = query_metadata[i].term_frequency;
-    //         }
-    //     }
-
-    //     let mut doc_ids = self.get_doc_ids_for_term(
-    //         &query_metadata[min_frequency_term_index].block_ids,
-    //         query_metadata[min_frequency_term_index].term_id,
-    //     );
-    //     for i in 0..query_metadata.len() {
-    //         if i != min_frequency_term_index {
-    //             self.intersect(
-    //                 &query_metadata[i].block_ids,
-    //                 query_metadata[i].term_id,
-    //                 &mut doc_ids,
-    //             )
-    //         }
-    //     }
-    // }
 
     pub fn process_query(
         &mut self,
@@ -114,9 +95,11 @@ impl QueryProcessor {
                     continue;
                 }
 
-                chunks.extend(
-                    block.decode_chunks_for_term(query_metadata[i].term_id, term_index as usize),
-                );
+                chunks.extend(block.decode_chunks_for_term(
+                    query_metadata[i].term_id,
+                    term_index as usize,
+                    self.compression_algorithm.clone(),
+                ));
             }
             term_iterators.push(TermIterator::new(
                 query_terms[i].clone(),

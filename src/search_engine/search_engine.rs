@@ -1,29 +1,27 @@
 use std::{
-    collections::HashMap,
     io::{self, Error, ErrorKind},
     path::Path,
 };
 
 use crate::{
-    dictionary::Posting,
+    compressors::compressor::CompressionAlgorithm,
     indexer::indexer::{DocumentMetadata, Indexer},
     query_parser::tokenizer::SearchTokenizer,
     query_processor::query_processor::QueryProcessor,
 };
-
-pub struct QueryResult {
-    doc_ids: Vec<u32>,
-}
-
 pub struct SearchEngine {
     query_processor: QueryProcessor,
     query_parser: SearchTokenizer,
     indexer: Indexer,
+    compression_algorithm: CompressionAlgorithm,
     index_directory_path: String,
 }
 
 impl SearchEngine {
-    pub fn new(index_directory_path: String) -> Result<Self, Error> {
+    pub fn new(
+        index_directory_path: String,
+        compression_algorithm: CompressionAlgorithm,
+    ) -> Result<Self, Error> {
         let path = Path::new(&index_directory_path);
         if !path.exists() || !path.is_dir() {
             return Err(Error::new(
@@ -32,14 +30,15 @@ impl SearchEngine {
             ));
         }
         let query_parser = SearchTokenizer::new()?;
-        let mut indexer = Indexer::new(query_parser.clone())?;
+        let mut indexer = Indexer::new(query_parser.clone(), compression_algorithm.clone())?;
         indexer.set_index_directory(index_directory_path.clone());
-        let query_processor = QueryProcessor::new()?;
+        let query_processor = QueryProcessor::new(compression_algorithm.clone())?;
         Ok(Self {
             query_processor,
-            index_directory_path,
             query_parser,
             indexer,
+            compression_algorithm,
+            index_directory_path,
         })
     }
 
@@ -59,23 +58,10 @@ impl SearchEngine {
 
     // }
 
-    fn get_scores_for_docs(
-        &self,
-        no_of_docs: u32,
-        query_terms: &HashMap<String, (u16, Vec<Posting>)>,
-    ) -> Vec<f32> {
-        let scores: Vec<f32> = vec![0.0; no_of_docs as usize];
-        // for (_, (_, posting_list)) in query_terms {
-        //     let df: f32 = get_document_frequency(posting_list);
-        //     for posting in posting_list {
-        //         let tf = get_term_frequency(posting);
-        //         let idf = get_inverse_document_frequency(df, self.no_of_docs);
-        //         let weight = get_tf_idf_weight(tf, idf);
-        //         scores[posting.doc_id as usize] = scores[posting.doc_id as usize] + weight;
-        //     }
-        // }
-        scores
+    pub fn compression_algorithm(&self) -> &CompressionAlgorithm {
+        &self.compression_algorithm
     }
+
     pub fn handle_query(&mut self, query: String) -> Result<Vec<&DocumentMetadata>, io::Error> {
         let token_query_result = self.query_parser.tokenize_query(query);
         if token_query_result.is_err() {

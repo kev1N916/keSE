@@ -1,4 +1,5 @@
 use crate::{
+    compressors::compressor::CompressionAlgorithm,
     dictionary::{Posting, Term},
     in_memory_dict::map_in_memory_dict::{MapInMemoryDict, MapInMemoryDictPointer},
     indexer::{index_metadata::InMemoryIndexMetatdata, spimi::Spmi},
@@ -56,6 +57,7 @@ pub struct Indexer {
     index_metadata: InMemoryIndexMetatdata,
     index_directory_path: String,
     search_tokenizer: SearchTokenizer,
+    compression_algorithm: CompressionAlgorithm,
 }
 
 fn extract_plaintext(text: &Vec<Vec<String>>) -> String {
@@ -73,19 +75,17 @@ fn extract_plaintext(text: &Vec<Vec<String>>) -> String {
 impl Indexer {
     pub fn new(
         search_tokenizer: SearchTokenizer,
-        // inverted_index_file: File,
+        compression_algorithm: CompressionAlgorithm,
     ) -> Result<Self, std::io::Error> {
-        // let search_tokenizer = SearchTokenizer::new()?;
         Ok(Self {
             l_avg: 0.0,
             doc_id: 0,
             include_positions: false,
             document_metadata: HashMap::new(),
             index_metadata: InMemoryIndexMetatdata::new(),
-            // term_sender: tx,
-            // term_receiver: rx,
             index_directory_path: String::new(),
             search_tokenizer,
+            compression_algorithm,
         })
     }
 
@@ -203,6 +203,7 @@ impl Indexer {
                 self.doc_id,
                 self.include_positions,
                 &self.document_metadata,
+                self.compression_algorithm.clone(),
                 64,
             )
             .unwrap();

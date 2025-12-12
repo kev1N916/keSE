@@ -4,7 +4,6 @@
 /// BM25 = Σ(t∈q) log((N - f_t + 0.5) / (f_t + 0.5)) * TF_BM25
 ///
 /// where TF_BM25 = (f_t,d * (k1 + 1)) / (f_t,d + k1 * ((1 - b) + (b * ℓ_d / ℓ_avg)))
-use std::collections::HashMap;
 
 /// BM25 parameters
 pub struct BM25Params {
