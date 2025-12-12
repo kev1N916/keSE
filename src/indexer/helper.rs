@@ -1,5 +1,5 @@
 use crate::{
-    compressors::vb_encode::{vb_decode, vb_encode},
+    compressor::vb_encode::{vb_decode, vb_encode},
     dictionary::Posting,
 };
 

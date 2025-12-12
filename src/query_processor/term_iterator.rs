@@ -1,4 +1,4 @@
-use crate::indexer::chunk::{Chunk, ChunkIterator};
+use crate::utils::{chunk::Chunk, chunk_iterator::ChunkIterator};
 
 pub struct TermIterator {
     pub term: String,
@@ -57,6 +57,11 @@ impl TermIterator {
     pub fn get_current_doc_score(&self) -> f32 {
         self.chunk_iterator.get_doc_score()
     }
+
+    pub fn get_current_chunk_score(&self) -> f32 {
+        self.chunk_iterator.get_doc_score()
+    }
+
     pub fn get_max_score(&self) -> f32 {
         self.max_score
     }

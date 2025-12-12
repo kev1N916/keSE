@@ -1,5 +1,5 @@
 use crate::{
-    compressors::compressor::CompressionAlgorithm,
+    compressor::compressor::CompressionAlgorithm,
     dictionary::{Posting, Term},
     in_memory_dict::map_in_memory_dict::{MapInMemoryDict, MapInMemoryDictPointer},
     indexer::{index_metadata::InMemoryIndexMetatdata, spimi::Spmi},

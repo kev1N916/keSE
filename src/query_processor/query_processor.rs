@@ -6,10 +6,10 @@ use std::{
 };
 
 use crate::{
-    compressors::compressor::CompressionAlgorithm,
+    compressor::compressor::CompressionAlgorithm,
     in_memory_dict::map_in_memory_dict::MapInMemoryDictPointer,
-    indexer::block::Block,
     query_processor::{algos::wand::wand, term_iterator::TermIterator},
+    utils::block::Block,
 };
 
 pub struct QueryProcessor {

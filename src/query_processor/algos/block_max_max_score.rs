@@ -5,7 +5,7 @@ use crate::query_processor::{
     term_iterator::TermIterator,
 };
 
-pub fn max_score(mut term_iterators: Vec<TermIterator>) -> Vec<u32> {
+pub fn block_max_max_score(mut term_iterators: Vec<TermIterator>) -> Vec<u32> {
     term_iterators.sort_by(|a, b| a.get_max_score().total_cmp(&b.get_max_score()));
     let n = term_iterators.len();
     let mut ub = vec![0.0; term_iterators.len()];
@@ -35,25 +35,34 @@ pub fn max_score(mut term_iterators: Vec<TermIterator>) -> Vec<u32> {
             }
         }
 
-        for i in (0..pivot).rev() {
-            if score + ub[i] <= threshold {
-                break;
+        if score + ub[pivot - 1] > threshold {
+            let mut bub = vec![0.0; term_iterators.len()];
+            // b[0].move(current);
+            // bub[0]=b[0].maxscore();
+            // for i in 1..pivot-1{
+            //     b[i].move(current);
+            //     bub[i]=bub[i-1]+b[i].maxscore();
+            // }
+            for i in (0..pivot).rev() {
+                if score + bub[i] <= threshold {
+                    break;
+                }
+                term_iterators[i].advance(current);
+                if term_iterators[i].get_current_doc_id() == current {
+                    score += term_iterators[i].get_current_doc_score()
+                }
             }
-            term_iterators[i].advance(current);
-            if term_iterators[i].get_current_doc_id() == current {
-                score += term_iterators[i].get_current_doc_score()
-            }
-        }
 
-        let will_pop = pq.len() >= 20 && score > pq.peek().unwrap().0.0.score;
-        if will_pop {
-            pq.push(Reverse(FloatDoc(DocData {
-                docid: current,
-                score,
-            })));
-            threshold = pq.peek().unwrap().0.0.score;
-            while pivot < n && ub[pivot] <= threshold {
-                pivot += 1;
+            let will_pop = pq.len() >= 20 && score > pq.peek().unwrap().0.0.score;
+            if will_pop {
+                pq.push(Reverse(FloatDoc(DocData {
+                    docid: current,
+                    score,
+                })));
+                threshold = pq.peek().unwrap().0.0.score;
+                while pivot < n && ub[pivot] <= threshold {
+                    pivot += 1;
+                }
             }
         }
         current = next;

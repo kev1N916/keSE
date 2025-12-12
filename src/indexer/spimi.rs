@@ -6,7 +6,7 @@ use std::{
 };
 
 use crate::{
-    compressors::compressor::CompressionAlgorithm,
+    compressor::compressor::CompressionAlgorithm,
     dictionary::{Dictionary, Posting, Term},
     indexer::{
         helper::vb_encode_posting_list, index_merge_iterator::IndexMergeIterator,

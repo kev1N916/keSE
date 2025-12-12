@@ -5,9 +5,9 @@ use std::{
 };
 
 use crate::{
-    compressors::compressor::CompressionAlgorithm,
+    compressor::compressor::CompressionAlgorithm,
     dictionary::Posting,
-    indexer::{block::Block, chunk::Chunk},
+    utils::{block::Block, chunk::Chunk},
 };
 
 /*
@@ -83,13 +83,13 @@ pub struct MergedIndexBlockWriter {
     pub include_positions: bool,
     file_writer: BufWriter<File>,
     compression_algorithm: CompressionAlgorithm,
-    pub max_block_size: u8, // in kb
+    pub chunk_size: u8, // in kb
 }
 
 impl MergedIndexBlockWriter {
     pub fn new(
         file: File,
-        max_block_size: Option<u8>,
+        chunk_size: Option<u8>,
         include_positions: bool,
         compression_algorithm: CompressionAlgorithm,
     ) -> Self {
@@ -100,9 +100,9 @@ impl MergedIndexBlockWriter {
             include_positions,
             file_writer: BufWriter::new(file),
             compression_algorithm,
-            max_block_size: match max_block_size {
-                Some(block_size) => block_size,
-                None => 64,
+            chunk_size: match chunk_size {
+                Some(chunk_size) => chunk_size,
+                None => 128,
             },
         }
     }
@@ -156,7 +156,7 @@ impl MergedIndexBlockWriter {
 
         let mut i = 0;
         loop {
-            if current_chunk.no_of_postings >= 128 {
+            if current_chunk.no_of_postings >= self.chunk_size {
                 // current_chunk.reset();
                 // self.current_block.current_chunk.finish();
                 // self.current_block.add_current_chunk();
@@ -237,7 +237,7 @@ mod tests {
 
         assert_eq!(writer.term_metadata.len(), 0);
         assert_eq!(writer.current_block_no, 0);
-        assert_eq!(writer.max_block_size, 64);
+        assert_eq!(writer.chunk_size, 128);
     }
 
     #[test]
@@ -245,9 +245,9 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
         let writer =
-            MergedIndexBlockWriter::new(file, Some(128), true, CompressionAlgorithm::Simple16);
+            MergedIndexBlockWriter::new(file, Some(64), true, CompressionAlgorithm::Simple16);
 
-        assert_eq!(writer.max_block_size, 128);
+        assert_eq!(writer.chunk_size, 64);
     }
 
     #[test]

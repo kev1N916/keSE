@@ -3,7 +3,7 @@ use std::{
     io::{self, BufReader, Read, Seek},
 };
 
-use crate::{compressors::compressor::CompressionAlgorithm, indexer::chunk::Chunk};
+use crate::{compressor::compressor::CompressionAlgorithm, utils::chunk::Chunk};
 
 const BLOCK_SIZE: usize = 64000;
 pub struct Block {

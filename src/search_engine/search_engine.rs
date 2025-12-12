@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    compressors::compressor::CompressionAlgorithm,
+    compressor::compressor::CompressionAlgorithm,
     indexer::indexer::{DocumentMetadata, Indexer},
     query_parser::tokenizer::SearchTokenizer,
     query_processor::query_processor::QueryProcessor,
