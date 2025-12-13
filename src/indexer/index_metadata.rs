@@ -1,5 +1,6 @@
 use crate::{
     in_memory_dict::map_in_memory_dict::{MapInMemoryDict, MapInMemoryDictPointer},
+    indexer::spimi::ChunkBlockMaxMetadata,
     my_bk_tree::{self, BkTree},
 };
 
@@ -41,6 +42,15 @@ impl InMemoryIndexMetatdata {
 
     pub fn set_term_id(&mut self, term: &str, term_id: u32) {
         self.in_memory_dict.set_term_id(term, term_id);
+    }
+
+    pub fn set_chunk_block_max_metadata(
+        &mut self,
+        term: &str,
+        chunk_block_max_metadata: Vec<ChunkBlockMaxMetadata>,
+    ) {
+        self.in_memory_dict
+            .set_chunk_block_max_metadata(term, chunk_block_max_metadata);
     }
 
     pub fn set_term_frequency(&mut self, term: &str, term_frequency: u32) {

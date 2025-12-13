@@ -5,13 +5,18 @@ use std::{
     u32,
 };
 
-use search_engine_cache::Cache;
+use search_engine_cache::CacheType;
 
 use crate::{
     compressor::compressor::CompressionAlgorithm,
     in_memory_dict::map_in_memory_dict::MapInMemoryDictPointer,
-    query_processor::{algos::wand::wand, term_iterator::TermIterator},
-    search_engine::search_engine::CacheType,
+    query_processor::{
+        algos::{
+            RankingAlgorithm, block_max_max_score::block_max_max_score,
+            block_max_wand::block_max_wand, max_score::max_score, wand::wand,
+        },
+        term_iterator::TermIterator,
+    },
     utils::block::Block,
 };
 
@@ -19,15 +24,20 @@ pub struct QueryProcessor {
     block_cache: CacheType<u32, Block>,
     inverted_index_file: File,
     compression_algorithm: CompressionAlgorithm,
+    ranking_algorithm: RankingAlgorithm,
 }
 
 impl QueryProcessor {
-    pub fn new(compression_algorithm: CompressionAlgorithm) -> io::Result<Self> {
+    pub fn new(
+        compression_algorithm: CompressionAlgorithm,
+        ranking_algorithm: RankingAlgorithm,
+    ) -> io::Result<Self> {
         let inverted_index_file = File::open("final.idx")?;
         Ok(Self {
             block_cache: CacheType::new_lfu(50),
             inverted_index_file,
             compression_algorithm,
+            ranking_algorithm,
         })
     }
 
@@ -115,14 +125,21 @@ impl QueryProcessor {
                     self.block_cache.put(*block_id, new_block, 1);
                 }
             }
+
             term_iterators.push(TermIterator::new(
                 query_terms[i].clone(),
                 query_metadata[i].term_id,
                 chunks,
                 query_metadata[i].max_score,
+                query_metadata[i].chunk_block_max_metadata.clone(),
             ));
         }
 
-        wand(term_iterators)
+        match self.ranking_algorithm {
+            RankingAlgorithm::Block_Max_Max_Score => block_max_max_score(term_iterators),
+            RankingAlgorithm::Block_Max_Wand => block_max_wand(term_iterators),
+            RankingAlgorithm::Max_Score => max_score(term_iterators),
+            RankingAlgorithm::Wand => wand(term_iterators),
+        }
     }
 }

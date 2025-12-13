@@ -1,19 +1,32 @@
-use crate::utils::{chunk::Chunk, chunk_iterator::ChunkIterator};
+use crate::{
+    indexer::spimi::ChunkBlockMaxMetadata,
+    query_processor::algos::utils::BlockMaxIterator,
+    utils::{chunk::Chunk, chunk_iterator::ChunkIterator},
+};
 
 pub struct TermIterator {
     pub term: String,
     pub term_id: u32,
     pub chunk_iterator: ChunkIterator,
     pub max_score: f32,
+    pub block_max_iterator: BlockMaxIterator,
+    // pub chunk_metadata: Vec<ChunkBlockMaxMetadata>,
 }
 
 impl TermIterator {
-    pub fn new(term: String, term_id: u32, chunks: Vec<Chunk>, max_score: f32) -> Self {
+    pub fn new(
+        term: String,
+        term_id: u32,
+        chunks: Vec<Chunk>,
+        max_score: f32,
+        chunk_metadata: Vec<ChunkBlockMaxMetadata>,
+    ) -> Self {
         Self {
             term,
             chunk_iterator: ChunkIterator::new(chunks),
             term_id,
             max_score,
+            block_max_iterator: BlockMaxIterator::new(chunk_metadata),
         }
     }
 
@@ -58,11 +71,23 @@ impl TermIterator {
         self.chunk_iterator.get_doc_score()
     }
 
-    pub fn get_current_chunk_score(&self) -> f32 {
-        self.chunk_iterator.get_doc_score()
-    }
-
     pub fn get_max_score(&self) -> f32 {
         self.max_score
     }
+
+    pub fn move_block_max_iterator(&mut self, doc_id: u32) {
+        self.block_max_iterator.advance(doc_id);
+    }
+
+    pub fn get_block_max_score(&mut self) -> f32 {
+        self.block_max_iterator.score()
+    }
+
+    pub fn get_last_block_doc_id(&mut self) -> u32 {
+        self.block_max_iterator.last()
+    }
+
+    // pub fn set_chunk_metadata(&mut self, chunk_metadata: Vec<ChunkBlockMaxMetadata>) {
+    //     self.chunk_metadata = chunk_metadata
+    // }
 }

@@ -1,11 +1,14 @@
 use std::collections::HashMap;
 
+use crate::indexer::spimi::ChunkBlockMaxMetadata;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct MapInMemoryDictPointer {
     pub term_id: u32,
     pub term_frequency: u32,
     pub max_score: f32,
     pub block_ids: Vec<u32>,
+    pub chunk_block_max_metadata: Vec<ChunkBlockMaxMetadata>,
 }
 
 impl MapInMemoryDictPointer {
@@ -15,6 +18,7 @@ impl MapInMemoryDictPointer {
             term_frequency: 0,
             max_score: 0.0,
             block_ids: Vec::new(),
+            chunk_block_max_metadata: Vec::new(),
         }
     }
 }
@@ -64,6 +68,16 @@ impl MapInMemoryDict {
     pub fn set_max_term_score(&mut self, term: &str, max_term_score: f32) {
         if let Some(pointer) = self.term_map.get_mut(term) {
             pointer.max_score = max_term_score;
+        }
+    }
+
+    pub fn set_chunk_block_max_metadata(
+        &mut self,
+        term: &str,
+        chunk_block_max_metadata: Vec<ChunkBlockMaxMetadata>,
+    ) {
+        if let Some(pointer) = self.term_map.get_mut(term) {
+            pointer.chunk_block_max_metadata = chunk_block_max_metadata;
         }
     }
 

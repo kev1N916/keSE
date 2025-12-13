@@ -1,76 +1,17 @@
 use std::{
-    hash::Hash,
     io::{self, Error, ErrorKind},
     path::Path,
 };
 
-use search_engine_cache::{landlord::Landlord, lfu_w::LFUCache, lru::LRUCache, *};
+use search_engine_cache::CacheType;
 
 use crate::{
     compressor::compressor::CompressionAlgorithm,
     indexer::indexer::{DocumentMetadata, Indexer},
     query_parser::tokenizer::SearchTokenizer,
+    query_processor::algos::RankingAlgorithm,
     query_processor::query_processor::QueryProcessor,
 };
-
-// Option 1: Enum wrapper for selecting cache type at runtime
-pub enum CacheType<K, V> {
-    LRU(LRUCache<K, V>),
-    LFU(LFUCache<K, V>),
-    Landlord(Landlord<K, V>),
-}
-
-impl<K: Clone + Hash + Eq, V> CacheType<K, V> {
-    pub fn new_lru(capacity: usize) -> Self {
-        CacheType::LRU(LRUCache::new(capacity))
-    }
-
-    pub fn new_lfu(capacity: usize) -> Self {
-        CacheType::LFU(LFUCache::new(capacity))
-    }
-
-    pub fn new_landlord(capacity: usize) -> Self {
-        CacheType::Landlord(Landlord::new(capacity))
-    }
-}
-
-impl<K: Clone + Hash + Eq, V> Cache<K, V> for CacheType<K, V> {
-    fn put(&mut self, key: K, value: V, weight: u32) {
-        match self {
-            CacheType::LRU(cache) => cache.put(key, value, weight),
-            CacheType::LFU(cache) => cache.put(key, value, weight),
-            CacheType::Landlord(cache) => cache.put(key, value, weight),
-        }
-    }
-
-    fn get(&mut self, key: &K) -> Option<&V> {
-        match self {
-            CacheType::LRU(cache) => cache.get(key),
-            CacheType::LFU(cache) => cache.get(key),
-            CacheType::Landlord(cache) => cache.get(key),
-        }
-    }
-
-    fn len(&self) -> usize {
-        match self {
-            CacheType::LRU(cache) => cache.len(),
-            CacheType::LFU(cache) => cache.len(),
-            CacheType::Landlord(cache) => cache.len(),
-        }
-    }
-
-    fn is_empty(&self) -> bool {
-        match self {
-            CacheType::LRU(cache) => cache.is_empty(),
-            CacheType::LFU(cache) => cache.is_empty(),
-            CacheType::Landlord(cache) => cache.is_empty(),
-        }
-    }
-
-    fn new(capacity: usize) -> Self {
-        todo!()
-    }
-}
 
 pub struct SearchEngine {
     query_cache: CacheType<String, Vec<u32>>,
@@ -96,7 +37,10 @@ impl SearchEngine {
         let query_parser = SearchTokenizer::new()?;
         let mut indexer = Indexer::new(query_parser.clone(), compression_algorithm.clone())?;
         indexer.set_index_directory(index_directory_path.clone());
-        let query_processor = QueryProcessor::new(compression_algorithm.clone())?;
+        let query_processor = QueryProcessor::new(
+            compression_algorithm.clone(),
+            RankingAlgorithm::Block_Max_Max_Score,
+        )?;
         Ok(Self {
             query_cache: CacheType::new_landlord(20),
             query_processor,

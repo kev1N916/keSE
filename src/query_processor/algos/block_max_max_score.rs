@@ -37,12 +37,12 @@ pub fn block_max_max_score(mut term_iterators: Vec<TermIterator>) -> Vec<u32> {
 
         if score + ub[pivot - 1] > threshold {
             let mut bub = vec![0.0; term_iterators.len()];
-            // b[0].move(current);
-            // bub[0]=b[0].maxscore();
-            // for i in 1..pivot-1{
-            //     b[i].move(current);
-            //     bub[i]=bub[i-1]+b[i].maxscore();
-            // }
+            term_iterators[0].move_block_max_iterator(current);
+            bub[0] = term_iterators[0].get_block_max_score();
+            for i in 1..pivot {
+                term_iterators[i].move_block_max_iterator(current);
+                bub[i] = bub[i - 1] + term_iterators[i].get_block_max_score();
+            }
             for i in (0..pivot).rev() {
                 if score + bub[i] <= threshold {
                     break;

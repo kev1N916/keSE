@@ -23,7 +23,11 @@ use crate::{
 pub struct Spmi {
     dictionary: Dictionary,
 }
-
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ChunkBlockMaxMetadata {
+    pub chunk_last_doc_id: u32,
+    pub chunk_max_term_score: f32,
+}
 impl Spmi {
     pub fn new() -> Self {
         Self {
@@ -58,7 +62,7 @@ impl Spmi {
         include_positions: bool,
         document_metadata: &HashMap<u32, DocumentMetadata>,
         compression_algorithm: CompressionAlgorithm,
-        block_size: u8,
+        chunk_size: u8,
     ) -> Result<InMemoryIndexMetatdata, io::Error> {
         let mut in_memory_index_metadata: InMemoryIndexMetatdata = InMemoryIndexMetatdata::new();
         let final_index_file = File::create("final.idx")?;
@@ -69,7 +73,7 @@ impl Spmi {
         let mut no_of_terms: u32 = 0;
         let mut index_merge_writer: MergedIndexBlockWriter = MergedIndexBlockWriter::new(
             final_index_file,
-            Some(block_size),
+            Some(chunk_size),
             include_positions,
             compression_algorithm,
         );
@@ -107,15 +111,35 @@ impl Spmi {
             }
             let f_t = final_merged.len() as u32;
             let mut max_term_score: f32 = 0.0;
+            let mut chunk_max_term_score: f32 = 0.0;
+            let mut chunk_metadata: Vec<ChunkBlockMaxMetadata> = Vec::new();
+            let mut chunk_index = 0;
             for posting in &final_merged {
                 let f_dt = posting.positions.len() as u32;
                 let l_d = document_metadata.get(&posting.doc_id).unwrap().doc_length;
                 let term_score: f32 = compute_term_score(f_dt, l_d, l_avg, n, f_t, &params);
                 max_term_score = max_term_score.max(term_score);
+                chunk_max_term_score = chunk_max_term_score.max(term_score);
+                if (chunk_index + 1) % chunk_size == 0 {
+                    chunk_metadata.push(ChunkBlockMaxMetadata {
+                        chunk_last_doc_id: posting.doc_id,
+                        chunk_max_term_score,
+                    });
+                    chunk_max_term_score = 0.0;
+                }
+                chunk_index += 1;
+            }
+            if chunk_max_term_score != 0.0 {
+                chunk_metadata.push(ChunkBlockMaxMetadata {
+                    chunk_last_doc_id: final_merged[f_t as usize - 1].doc_id,
+                    chunk_max_term_score,
+                });
             }
             index_merge_writer.add_term(no_of_terms, final_merged)?;
             in_memory_index_metadata.set_term_id(&term, no_of_terms);
             in_memory_index_metadata.set_max_term_score(&term, max_term_score);
+            in_memory_index_metadata.set_chunk_block_max_metadata(&term, chunk_metadata);
+
             in_memory_index_metadata.add_term_to_bk_tree(term);
         }
 

@@ -2,23 +2,10 @@ use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
 use crate::query_processor::{
-    algos::utils::{DocData, FloatDoc},
+    algos::utils::{DocData, FloatDoc, sort_by_doc_id, swap_down},
     term_iterator::TermIterator,
 };
 
-pub fn sort_by_doc_id(term_iterators: &mut Vec<TermIterator>) {
-    term_iterators.sort_by(|a, b| a.get_current_doc_id().cmp(&b.get_current_doc_id()));
-}
-pub fn swap_down(term_iterators: &mut Vec<TermIterator>, pivot: usize) {
-    let mut temp = pivot;
-    while (temp + 1 < term_iterators.len()
-        && term_iterators[temp].get_current_doc_id()
-            > term_iterators[temp + 1].get_current_doc_id())
-    {
-        term_iterators.swap(temp, temp + 1);
-        temp += 1;
-    }
-}
 pub fn wand(mut term_iterators: Vec<TermIterator>) -> Vec<u32> {
     let mut pq: BinaryHeap<Reverse<FloatDoc>> = BinaryHeap::with_capacity(20);
     let mut threshold = 0.0;

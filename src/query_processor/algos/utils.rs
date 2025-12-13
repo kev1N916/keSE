@@ -2,38 +2,72 @@
 
 use std::cmp::Ordering;
 
-// 1. Define the document structure
+use crate::{indexer::spimi::ChunkBlockMaxMetadata, query_processor::term_iterator::TermIterator};
+
 #[derive(Debug, PartialEq)]
 pub struct DocData {
     pub docid: u32,
-    pub score: f32, // The raw floating point score
+    pub score: f32,
 }
 
-// 2. Wrapper Struct: Used only for the BinaryHeap to derive ordering
-// We must implement Eq, Ord, PartialOrd, and PartialEq manually because of the f32.
-// We use the derived PartialEq but manually implement the rest based on score.
 #[derive(Debug, PartialEq)]
 pub struct FloatDoc(pub DocData);
 
 impl Eq for FloatDoc {}
 
-// Implement Ord: This defines the total ordering for the heap
 impl Ord for FloatDoc {
     fn cmp(&self, other: &Self) -> Ordering {
-        // Compare the f32 scores.
-        // We use the total_cmp method, which returns an Ordering and handles NaN.
-        // NaN is treated as the smallest possible value by total_cmp.
         self.0
             .score
             .total_cmp(&other.0.score)
-            .then_with(|| self.0.docid.cmp(&other.0.docid)) // Use docid as tie-breaker
+            .then_with(|| self.0.docid.cmp(&other.0.docid))
     }
 }
 
 impl PartialOrd for FloatDoc {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        // Since we implemented Ord using total_cmp (which guarantees total order),
-        // we can safely just call the full comparison logic here.
         Some(self.cmp(other))
+    }
+}
+
+pub fn sort_by_doc_id(term_iterators: &mut Vec<TermIterator>) {
+    term_iterators.sort_by(|a, b| a.get_current_doc_id().cmp(&b.get_current_doc_id()));
+}
+pub fn swap_down(term_iterators: &mut Vec<TermIterator>, pivot: usize) {
+    let mut temp = pivot;
+    while (temp + 1 < term_iterators.len()
+        && term_iterators[temp].get_current_doc_id()
+            > term_iterators[temp + 1].get_current_doc_id())
+    {
+        term_iterators.swap(temp, temp + 1);
+        temp += 1;
+    }
+}
+
+pub struct BlockMaxIterator {
+    block_index: usize,
+    blocks: Vec<ChunkBlockMaxMetadata>,
+}
+
+impl BlockMaxIterator {
+    pub fn new(blocks: Vec<ChunkBlockMaxMetadata>) -> Self {
+        Self {
+            block_index: 0,
+            blocks,
+        }
+    }
+
+    pub fn last(&self) -> u32 {
+        self.blocks[self.block_index].chunk_last_doc_id
+    }
+
+    pub fn score(&self) -> f32 {
+        self.blocks[self.block_index].chunk_max_term_score
+    }
+
+    pub fn advance(&mut self, doc_id: u32) {
+        while self.blocks[self.block_index].chunk_last_doc_id < doc_id {
+            self.block_index += 1;
+        }
     }
 }

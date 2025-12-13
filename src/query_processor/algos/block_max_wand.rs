@@ -2,26 +2,16 @@ use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::u32;
 
-use crate::query_processor::algos::utils::{DocData, FloatDoc};
+use crate::query_processor::algos::utils::{
+    BlockMaxIterator, DocData, FloatDoc, sort_by_doc_id, swap_down,
+};
 use crate::query_processor::term_iterator::TermIterator;
 
-pub fn sort_by_doc_id(term_iterators: &mut Vec<TermIterator>) {
-    term_iterators.sort_by(|a, b| a.get_current_doc_id().cmp(&b.get_current_doc_id()));
-}
-pub fn swap_down(term_iterators: &mut Vec<TermIterator>, pivot: usize) {
-    let mut temp = pivot;
-    while (temp + 1 < term_iterators.len()
-        && term_iterators[temp].get_current_doc_id()
-            > term_iterators[temp + 1].get_current_doc_id())
-    {
-        term_iterators.swap(temp, temp + 1);
-        temp += 1;
-    }
-}
 pub fn block_max_wand(mut term_iterators: Vec<TermIterator>) -> Vec<u32> {
     let mut pq: BinaryHeap<Reverse<FloatDoc>> = BinaryHeap::with_capacity(20);
     let mut threshold = 0.0;
     sort_by_doc_id(&mut term_iterators);
+
     loop {
         let mut score: f32 = 0.0;
         let mut pivot = 0;
@@ -46,18 +36,18 @@ pub fn block_max_wand(mut term_iterators: Vec<TermIterator>) -> Vec<u32> {
         let mut next = u32::MAX;
         for i in 0..pivot + 1 {
             // Shallow move
-            // b[i].move(pivot_id);
-            pivot_score += term_iterators[i].get_current_chunk_score();
-            // if b[i].last()<next{
-            //     next=b[i].last();
-            // }
+            term_iterators[i].advance(pivot_id);
+            pivot_score += term_iterators[i].get_block_max_score();
+            if term_iterators[i].get_last_block_doc_id() < next {
+                next = term_iterators[i].get_last_block_doc_id();
+            }
         }
         if pivot_score >= threshold {
             if pivot_id == term_iterators[0].get_current_doc_id() {
                 let mut score = 0.0;
                 for i in 0..pivot + 1 {
                     score += term_iterators[i].get_current_doc_score();
-                    pivot_score = pivot_score - term_iterators[i].get_current_chunk_score()
+                    pivot_score = pivot_score - term_iterators[i].get_block_max_score()
                         + term_iterators[i].get_current_doc_score();
                     if pivot_score <= threshold {
                         break;
