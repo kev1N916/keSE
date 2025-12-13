@@ -901,6 +901,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "priority-queue"
+version = "2.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93980406f12d9f8140ed5abe7155acb10bb1e69ea55c88960b9c2f117445ef96"
+dependencies = [
+ "equivalent",
+ "indexmap",
+ "serde",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.103"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1058,10 +1069,20 @@ dependencies = [
  "pdf-extract",
  "pdf_oxide",
  "regex",
+ "search_engine_cache",
  "search_engine_compressors",
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "search_engine_cache"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb6aa57be0ae150700ce3cfb2e23bedcbdc01a79f2502892436ba4493af6ac4f"
+dependencies = [
+ "priority-queue",
 ]
 
 [[package]]

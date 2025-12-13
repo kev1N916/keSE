@@ -1,19 +1,6 @@
 use std::collections::HashMap;
-#[derive(Debug, Clone, PartialEq)]
-pub struct Posting {
-    pub doc_id: u32,
-    pub positions: Vec<u32>,
-}
-impl Posting {
-    pub fn new(doc_id: u32, positions: Vec<u32>) -> Self {
-        Self { doc_id, positions }
-    }
-}
-pub struct Term {
-    pub term: String,
-    pub posting: Posting,
-}
 
+use crate::utils::posting::Posting;
 #[derive(Debug, Clone)]
 pub struct Dictionary {
     current_size: u32,
@@ -28,10 +15,10 @@ impl Dictionary {
         };
     }
 
-    pub fn max_size(& self)->u32{
+    pub fn max_size(&self) -> u32 {
         return 10000000;
     }
-    pub fn size(& self) -> u32 {
+    pub fn size(&self) -> u32 {
         self.current_size
     }
     pub fn clear(&mut self) {
@@ -49,7 +36,7 @@ impl Dictionary {
             let posting_length = posting.positions.len() as u32;
             self.current_size += 4 + 4 * posting_length;
         }
-        self.current_size+=4;
+        self.current_size += 4;
         self.current_size += term.len() as u32;
     }
 
@@ -63,8 +50,8 @@ impl Dictionary {
     pub fn add_term(&mut self, term: &str) {
         if !self.does_term_already_exist(term) {
             self.dictionary.insert(String::from(term), Vec::new());
-            self.current_size+=4;
-            self.current_size +=term.len() as u32
+            self.current_size += 4;
+            self.current_size += term.len() as u32
         }
     }
 

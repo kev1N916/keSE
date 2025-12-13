@@ -7,14 +7,17 @@ use std::{
 
 use crate::{
     compressor::compressor::CompressionAlgorithm,
-    dictionary::{Dictionary, Posting, Term},
+    dictionary::Dictionary,
     indexer::{
         helper::vb_encode_posting_list, index_merge_iterator::IndexMergeIterator,
         index_merge_writer::MergedIndexBlockWriter, index_metadata::InMemoryIndexMetatdata,
         indexer::DocumentMetadata,
     },
-    positional_intersect::merge_postings,
     scoring::bm_25::{BM25Params, compute_term_score},
+    utils::{
+        posting::{Posting, merge_postings},
+        term::Term,
+    },
 };
 
 pub struct Spmi {

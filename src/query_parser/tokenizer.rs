@@ -24,7 +24,7 @@ pub struct Token {
     pub word: String,
 }
 
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub struct Lemmatizer {
     lemmas: HashMap<String, String>,
 }
@@ -40,7 +40,7 @@ impl Lemmatizer {
     }
 }
 
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub struct SearchTokenizer {
     lemmatizer: Lemmatizer,
 }
@@ -122,14 +122,14 @@ impl SearchTokenizer {
 
     pub fn tokenize_query(
         &self,
-        sentences: String,
+        sentences: &String,
     ) -> Result<TokenizeQueryResult, TokenizationError> {
         if sentences.trim().is_empty() {
             return Err(TokenizationError::EmptyInput);
         }
 
         let mut unigram_tokens: Vec<Token> = Vec::new();
-        let mut bigram_tokens:Vec<Token>=Vec::new();
+        let mut bigram_tokens: Vec<Token> = Vec::new();
         let mut position = 0;
         let mut prev_lemma: Option<String> = None;
 
@@ -142,14 +142,14 @@ impl SearchTokenizer {
                 let current_lemma = match lemma {
                     Some(lemma) => {
                         unigram_tokens.push(Token {
-                            position: position,
+                            position,
                             word: lemma.clone(),
                         });
                         lemma
                     }
                     None => {
                         unigram_tokens.push(Token {
-                            position: position,
+                            position,
                             word: cleaned_word.clone(),
                         });
                         cleaned_word.clone()
@@ -171,7 +171,7 @@ impl SearchTokenizer {
 
         Ok(TokenizeQueryResult {
             unigram: unigram_tokens,
-            bigram:bigram_tokens
+            bigram: bigram_tokens,
         })
     }
 
@@ -238,7 +238,6 @@ mod tests {
         let result = SearchTokenizer::new();
         assert!(result.is_ok(), "Should successfully create tokenizer");
     }
-
 
     // #[test]
     // fn test_multiple_words() {

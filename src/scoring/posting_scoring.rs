@@ -1,7 +1,6 @@
-use crate::dictionary::Posting;
-
 use std::cmp::Ordering;
-use std::collections::BinaryHeap;
+
+use crate::utils::posting::Posting;
 
 #[derive(Debug, Clone, Copy)]
 pub struct ScoredDoc {

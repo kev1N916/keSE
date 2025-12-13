@@ -1,10 +1,10 @@
 use crate::{
     compressor::compressor::CompressionAlgorithm,
-    dictionary::{Posting, Term},
     in_memory_dict::map_in_memory_dict::{MapInMemoryDict, MapInMemoryDictPointer},
     indexer::{index_metadata::InMemoryIndexMetatdata, spimi::Spmi},
     my_bk_tree::BkTree,
     query_parser::tokenizer::SearchTokenizer,
+    utils::{posting::Posting, term::Term},
 };
 use bzip2::read::BzDecoder;
 use pdf_oxide::PdfDocument;

@@ -6,8 +6,7 @@ use std::{
 
 use crate::{
     compressor::compressor::CompressionAlgorithm,
-    dictionary::Posting,
-    utils::{block::Block, chunk::Chunk},
+    utils::{block::Block, chunk::Chunk, posting::Posting},
 };
 
 /*
@@ -220,7 +219,6 @@ impl MergedIndexBlockWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dictionary::Posting;
     use std::io::{Read, Seek, SeekFrom};
     use tempfile::NamedTempFile;
 

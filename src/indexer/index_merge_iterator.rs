@@ -3,7 +3,7 @@ use std::{
     io::{self, Read, Seek},
 };
 
-use crate::{dictionary::Posting, indexer::helper::vb_decode_posting_list};
+use crate::{indexer::helper::vb_decode_posting_list, utils::posting::Posting};
 
 pub struct IndexMergeIterator {
     no_of_terms: u32,
@@ -84,7 +84,7 @@ impl IndexMergeIterator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{dictionary::Posting, indexer::helper::vb_encode_posting_list};
+    use crate::indexer::helper::vb_encode_posting_list;
     use std::io::{Seek, Write};
     use tempfile::NamedTempFile;
 

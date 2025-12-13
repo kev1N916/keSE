@@ -3,7 +3,6 @@ mod dictionary;
 mod in_memory_dict;
 mod indexer;
 mod my_bk_tree;
-mod positional_intersect;
 mod query_parser;
 mod query_processor;
 mod scoring;

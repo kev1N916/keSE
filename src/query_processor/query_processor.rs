@@ -1,18 +1,22 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     fs::File,
     io::{self, BufReader},
     u32,
 };
 
+use search_engine_cache::Cache;
+
 use crate::{
     compressor::compressor::CompressionAlgorithm,
     in_memory_dict::map_in_memory_dict::MapInMemoryDictPointer,
     query_processor::{algos::wand::wand, term_iterator::TermIterator},
+    search_engine::search_engine::CacheType,
     utils::block::Block,
 };
 
 pub struct QueryProcessor {
+    block_cache: CacheType<u32, Block>,
     inverted_index_file: File,
     compression_algorithm: CompressionAlgorithm,
 }
@@ -21,6 +25,7 @@ impl QueryProcessor {
     pub fn new(compression_algorithm: CompressionAlgorithm) -> io::Result<Self> {
         let inverted_index_file = File::open("final.idx")?;
         Ok(Self {
+            block_cache: CacheType::new_lfu(50),
             inverted_index_file,
             compression_algorithm,
         })
@@ -78,28 +83,37 @@ impl QueryProcessor {
         query_metadata: Vec<&MapInMemoryDictPointer>,
     ) -> Vec<u32> {
         let mut term_iterators: Vec<TermIterator> = Vec::new();
-        let mut block_map: HashMap<u32, Block> = HashMap::new();
         let mut reader: BufReader<&mut File> = BufReader::new(&mut self.inverted_index_file);
 
         for i in 0..query_metadata.len() {
             let mut chunks = Vec::new();
             for block_id in &query_metadata[i].block_ids {
-                let block = block_map.entry(*block_id).or_insert_with(|| {
+                if let Some(block) = self.block_cache.get(block_id) {
+                    let term_index = block.check_if_term_exists(query_metadata[i].term_id);
+
+                    if term_index == -1 {
+                        continue;
+                    }
+                    chunks.extend(block.decode_chunks_for_term(
+                        query_metadata[i].term_id,
+                        term_index as usize,
+                        self.compression_algorithm.clone(),
+                    ));
+                } else {
                     let mut new_block = Block::new(*block_id);
-                    let _ = new_block.init(&mut reader);
-                    new_block
-                });
-                let term_index = block.check_if_term_exists(query_metadata[i].term_id);
+                    new_block.init(&mut reader).unwrap();
+                    let term_index = new_block.check_if_term_exists(query_metadata[i].term_id);
 
-                if term_index == -1 {
-                    continue;
+                    if term_index == -1 {
+                        continue;
+                    }
+                    chunks.extend(new_block.decode_chunks_for_term(
+                        query_metadata[i].term_id,
+                        term_index as usize,
+                        self.compression_algorithm.clone(),
+                    ));
+                    self.block_cache.put(*block_id, new_block, 1);
                 }
-
-                chunks.extend(block.decode_chunks_for_term(
-                    query_metadata[i].term_id,
-                    term_index as usize,
-                    self.compression_algorithm.clone(),
-                ));
             }
             term_iterators.push(TermIterator::new(
                 query_terms[i].clone(),

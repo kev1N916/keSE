@@ -1,6 +1,6 @@
 use crate::{
     compressor::vb_encode::{vb_decode, vb_encode},
-    dictionary::Posting,
+    utils::posting::Posting,
 };
 
 pub(crate) fn vb_decode_positions(bytes: &[u8]) -> Vec<u32> {
