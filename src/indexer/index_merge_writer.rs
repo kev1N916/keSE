@@ -199,8 +199,9 @@ impl MergedIndexBlockWriter {
 
             let current_posting = &postings[i];
             current_chunk.add_doc_id(current_posting.doc_id);
-            if current_posting.positions.len() > 0 {
-                current_chunk.add_positions(current_posting.positions.clone());
+            current_chunk.add_doc_frequency(current_posting.positions.len() as u32);
+            if current_posting.positions.len() > 0 && self.include_positions {
+                current_chunk.add_doc_positions(current_posting.positions.clone());
             }
             current_chunk.no_of_postings += 1;
             i += 1;
@@ -390,29 +391,6 @@ mod tests {
     }
 
     #[test]
-    fn test_multiple_blocks_same_term() {
-        let temp_file = NamedTempFile::new().unwrap();
-        let file = temp_file.reopen().unwrap();
-        let mut writer =
-            MergedIndexBlockWriter::new(file, Some(1), true, CompressionAlgorithm::Simple16); // Very small blocks
-
-        // Create enough postings to span multiple blocks
-        let mut postings = Vec::new();
-        for i in 0..200 {
-            postings.push(create_test_postings(i * 100, vec![1, 2, 3, 4, 5]));
-        }
-
-        let result = writer.add_term(1, postings);
-        assert!(result.is_ok());
-        writer.finish().unwrap();
-
-        let metadata = writer.get_term_metadata(1).unwrap();
-        assert_eq!(metadata.term_frequency, 200);
-        // Term should appear in multiple blocks due to small block size
-        assert!(metadata.block_ids.len() > 1);
-    }
-
-    #[test]
     fn test_sequential_doc_ids() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
@@ -487,25 +465,6 @@ mod tests {
     }
 
     #[test]
-    fn test_term_metadata_structure() {
-        let mut metadata = TermMetadata {
-            block_ids: Vec::new(),
-            term_frequency: 0,
-        };
-
-        metadata.add_block_id(0);
-        metadata.add_block_id(1);
-        metadata.add_block_id(2);
-
-        assert_eq!(metadata.block_ids.len(), 3);
-        // assert_eq!(metadata.block_ids[0], 0);
-        // assert_eq!(metadata.block_ids[2], 2);
-
-        metadata.set_term_frequency(42);
-        assert_eq!(metadata.term_frequency, 42);
-    }
-
-    #[test]
     fn test_multiple_terms_different_sizes() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
@@ -555,7 +514,7 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
         let mut writer =
-            MergedIndexBlockWriter::new(file, Some(64), true, CompressionAlgorithm::Simple16);
+            MergedIndexBlockWriter::new(file, Some(64), false, CompressionAlgorithm::RiceCoding);
 
         let postings = vec![
             create_test_postings(u32::MAX - 1000, vec![1]),

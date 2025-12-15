@@ -6,11 +6,17 @@ use crate::query_processor::retrieval_algorithms::utils::{
     DocData, FloatDoc, sort_by_doc_id, swap_down,
 };
 use crate::query_processor::term_iterator::TermIterator;
+use crate::scoring::bm_25::BM25Params;
 
-pub fn block_max_wand(mut term_iterators: Vec<TermIterator>) -> Vec<u32> {
+pub fn block_max_wand(
+    mut term_iterators: Vec<TermIterator>,
+    doc_lengths: &Vec<u32>,
+    average_doc_length: f32,
+) -> Vec<u32> {
     let mut pq: BinaryHeap<Reverse<FloatDoc>> = BinaryHeap::with_capacity(20);
     let mut threshold = 0.0;
     sort_by_doc_id(&mut term_iterators);
+    let params = BM25Params::default();
 
     loop {
         let mut score: f32 = 0.0;
@@ -47,9 +53,19 @@ pub fn block_max_wand(mut term_iterators: Vec<TermIterator>) -> Vec<u32> {
             if pivot_id == term_iterators[0].get_current_doc_id() {
                 let mut score = 0.0;
                 for i in 0..pivot + 1 {
-                    score += term_iterators[i].get_current_doc_score();
+                    score += term_iterators[i].get_current_doc_score(
+                        &doc_lengths[pivot_id as usize - 1],
+                        average_doc_length,
+                        &params,
+                        doc_lengths.len() as u32,
+                    );
                     pivot_score = pivot_score - term_iterators[i].get_block_max_score()
-                        + term_iterators[i].get_current_doc_score();
+                        + term_iterators[i].get_current_doc_score(
+                            &doc_lengths[pivot_id as usize - 1],
+                            average_doc_length,
+                            &params,
+                            doc_lengths.len() as u32,
+                        );
                     if pivot_score <= threshold {
                         break;
                     }

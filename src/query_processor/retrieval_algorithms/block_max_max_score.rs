@@ -1,11 +1,18 @@
 use std::{cmp::Reverse, collections::BinaryHeap, u32};
 
-use crate::query_processor::{
-    retrieval_algorithms::utils::{DocData, FloatDoc},
-    term_iterator::TermIterator,
+use crate::{
+    query_processor::{
+        retrieval_algorithms::utils::{DocData, FloatDoc},
+        term_iterator::TermIterator,
+    },
+    scoring::bm_25::BM25Params,
 };
 
-pub fn block_max_max_score(mut term_iterators: Vec<TermIterator>) -> Vec<u32> {
+pub fn block_max_max_score(
+    mut term_iterators: Vec<TermIterator>,
+    doc_lengths: &Vec<u32>,
+    average_doc_length: f32,
+) -> Vec<u32> {
     term_iterators.sort_by(|a, b| a.get_max_score().total_cmp(&b.get_max_score()));
     let n = term_iterators.len();
     let mut ub = vec![0.0; term_iterators.len()];
@@ -20,6 +27,7 @@ pub fn block_max_max_score(mut term_iterators: Vec<TermIterator>) -> Vec<u32> {
     for term_iterator in &term_iterators {
         current = current.min(term_iterator.get_current_doc_id());
     }
+    let params = BM25Params::default();
 
     while pivot < n && current != 0 {
         let mut score = 0.0;
@@ -27,7 +35,12 @@ pub fn block_max_max_score(mut term_iterators: Vec<TermIterator>) -> Vec<u32> {
 
         for i in pivot..n {
             if term_iterators[i].get_current_doc_id() == current {
-                score += term_iterators[i].get_current_doc_score();
+                score += term_iterators[i].get_current_doc_score(
+                    &doc_lengths[current as usize - 1],
+                    average_doc_length,
+                    &params,
+                    doc_lengths.len() as u32,
+                );
                 term_iterators[i].next();
             }
             if term_iterators[i].get_current_doc_id() < next {
@@ -49,7 +62,12 @@ pub fn block_max_max_score(mut term_iterators: Vec<TermIterator>) -> Vec<u32> {
                 }
                 term_iterators[i].advance(current as u32);
                 if term_iterators[i].get_current_doc_id() == current {
-                    score += term_iterators[i].get_current_doc_score()
+                    score += term_iterators[i].get_current_doc_score(
+                        &doc_lengths[current as usize - 1],
+                        average_doc_length,
+                        &params,
+                        doc_lengths.len() as u32,
+                    );
                 }
             }
 

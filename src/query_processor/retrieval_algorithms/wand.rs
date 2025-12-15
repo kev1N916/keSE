@@ -1,15 +1,24 @@
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
-use crate::query_processor::{
-    retrieval_algorithms::utils::{DocData, FloatDoc, sort_by_doc_id, swap_down},
-    term_iterator::TermIterator,
+use crate::{
+    query_processor::{
+        retrieval_algorithms::utils::{DocData, FloatDoc, sort_by_doc_id, swap_down},
+        term_iterator::TermIterator,
+    },
+    scoring::bm_25::BM25Params,
 };
 
-pub fn wand(mut term_iterators: Vec<TermIterator>) -> Vec<u32> {
+pub fn wand(
+    mut term_iterators: Vec<TermIterator>,
+    doc_lengths: &Vec<u32>,
+    average_doc_length: f32,
+) -> Vec<u32> {
     let mut pq: BinaryHeap<Reverse<FloatDoc>> = BinaryHeap::with_capacity(20);
     let mut threshold = 0.0;
     sort_by_doc_id(&mut term_iterators);
+    let params = BM25Params::default();
+
     loop {
         let mut score: f32 = 0.0;
         let mut pivot = 0;
@@ -33,7 +42,12 @@ pub fn wand(mut term_iterators: Vec<TermIterator>) -> Vec<u32> {
                 if term_iterators[i].get_current_doc_id() != pivot_id {
                     break;
                 }
-                score += term_iterators[i].get_current_doc_score();
+                score += term_iterators[i].get_current_doc_score(
+                    &doc_lengths[pivot_id as usize - 1],
+                    average_doc_length,
+                    &params,
+                    doc_lengths.len() as u32,
+                );
                 term_iterators[i].next();
             }
             pq.push(Reverse(FloatDoc(DocData {

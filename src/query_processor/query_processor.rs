@@ -11,8 +11,9 @@ use crate::{
     compressor::compressor::CompressionAlgorithm,
     query_processor::{
         retrieval_algorithms::{
-            RankingAlgorithm, binary_merge::binary_merge, block_max_max_score::block_max_max_score,
-            block_max_wand::block_max_wand, max_score::max_score, wand::wand,
+            RankingAlgorithm, binary_merge::holistic_binary_merge,
+            block_max_max_score::block_max_max_score, block_max_wand::block_max_wand,
+            max_score::max_score, wand::wand,
         },
         term_iterator::TermIterator,
     },
@@ -90,6 +91,8 @@ impl QueryProcessor {
         &mut self,
         query_terms: Vec<String>,
         query_metadata: Vec<&InMemoryTermMetadata>,
+        document_lengths: &Vec<u32>,
+        average_document_length: f32,
     ) -> Vec<u32> {
         let mut term_iterators: Vec<TermIterator> = Vec::new();
         let mut reader: BufReader<&mut File> = BufReader::new(&mut self.inverted_index_file);
@@ -128,6 +131,7 @@ impl QueryProcessor {
             term_iterators.push(TermIterator::new(
                 query_terms[i].clone(),
                 query_metadata[i].term_id,
+                query_metadata[i].term_frequency,
                 chunks,
                 query_metadata[i].max_score,
                 query_metadata[i].chunk_block_max_metadata.clone(),
@@ -135,11 +139,19 @@ impl QueryProcessor {
         }
 
         match self.ranking_algorithm {
-            RankingAlgorithm::Block_Max_Max_Score => block_max_max_score(term_iterators),
-            RankingAlgorithm::Block_Max_Wand => block_max_wand(term_iterators),
-            RankingAlgorithm::Max_Score => max_score(term_iterators),
-            RankingAlgorithm::Wand => wand(term_iterators),
-            RankingAlgorithm::Boolean => binary_merge(term_iterators),
+            RankingAlgorithm::BlockMaxMaxScore => {
+                block_max_max_score(term_iterators, document_lengths, average_document_length)
+            }
+            RankingAlgorithm::BlockMaxWand => {
+                block_max_wand(term_iterators, document_lengths, average_document_length)
+            }
+            RankingAlgorithm::MaxScore => {
+                max_score(term_iterators, document_lengths, average_document_length)
+            }
+            RankingAlgorithm::Wand => {
+                wand(term_iterators, document_lengths, average_document_length)
+            }
+            RankingAlgorithm::Boolean => holistic_binary_merge(term_iterators),
         }
     }
 }

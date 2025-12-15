@@ -10,10 +10,8 @@ pub struct Block {
     pub current_block_size: u32,
     pub no_of_terms: u32,
     pub block_id: u32,
-    // pub current_chunk: Chunk,
     pub chunks: Vec<Chunk>,
     pub chunk_bytes: Vec<u8>,
-    // pub block_bytes: [u8; BLOCK_SIZE],
     pub terms: Vec<u32>,
     pub term_offsets: Vec<u16>,
 }
@@ -24,10 +22,8 @@ impl Block {
             current_block_size: 4,
             no_of_terms: 0,
             block_id,
-            // current_chunk: Chunk::new(0),
             chunk_bytes: Vec::new(),
             chunks: Vec::new(),
-            // block_bytes: [0; BLOCK_SIZE],
             term_offsets: Vec::new(),
             terms: Vec::new(),
         }
@@ -38,7 +34,6 @@ impl Block {
         self.chunks.clear();
         self.terms.clear();
         self.chunk_bytes.clear();
-        // self.block_bytes = [0; BLOCK_SIZE];
         self.term_offsets.clear();
     }
 

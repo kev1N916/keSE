@@ -33,14 +33,16 @@ pub struct DocumentMetadata {
     pub doc_length: u32,
 }
 pub struct Indexer {
-    l_avg: f32,
+    pub avg_doc_length: f32,
     doc_id: u32,
     include_positions: bool,
-    document_metadata: HashMap<u32, DocumentMetadata>,
-    // in_memory_index: InMemoryIndex,
+    document_names: Vec<String>,
+    document_urls: Vec<String>,
+    pub document_lengths: Vec<u32>,
     index_directory_path: String,
     search_tokenizer: SearchTokenizer,
     compression_algorithm: CompressionAlgorithm,
+    result_directory_path: String,
 }
 
 fn extract_plaintext(text: &Vec<Vec<String>>) -> String {
@@ -59,27 +61,27 @@ impl Indexer {
     pub fn new(
         search_tokenizer: SearchTokenizer,
         compression_algorithm: CompressionAlgorithm,
+        result_directory_path: String,
     ) -> Result<Self, std::io::Error> {
         Ok(Self {
-            l_avg: 0.0,
+            avg_doc_length: 0.0,
             doc_id: 0,
             include_positions: false,
-            document_metadata: HashMap::new(),
-            // in_memory_index: InMemoryIndex::new(),
+            // document_metadata: HashMap::new(),
+            document_lengths: Vec::new(),
+            document_names: Vec::new(),
+            document_urls: Vec::new(),
             index_directory_path: String::new(),
             search_tokenizer,
             compression_algorithm,
+            result_directory_path,
         })
     }
 
     pub fn get_no_of_docs(&self) -> u32 {
         self.doc_id
     }
-    fn read_bz2_file(
-        &mut self,
-        path: &Path,
-        tx: &mpsc::Sender<Term>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    fn read_bz2_file(&mut self, path: &Path, tx: &mpsc::Sender<Term>) -> io::Result<()> {
         let file = File::open(path)?;
         let decoder = BzDecoder::new(file);
         let reader = BufReader::new(decoder);
@@ -96,14 +98,17 @@ impl Indexer {
 
                     let plain_text = extract_plaintext(&article.text);
                     let tokens = self.search_tokenizer.tokenize(plain_text);
-                    self.document_metadata.insert(
-                        self.doc_id,
-                        DocumentMetadata {
-                            doc_name: article.title,
-                            doc_url: article.url,
-                            doc_length: tokens.len() as u32,
-                        },
-                    );
+                    // self.document_metadata.insert(
+                    //     self.doc_id,
+                    //     DocumentMetadata {
+                    //         doc_name: article.title,
+                    //         doc_url: article.url,
+                    //         doc_length: tokens.len() as u32,
+                    //     },
+                    // );
+                    self.document_names.push(article.title);
+                    self.document_urls.push(article.url);
+                    self.document_lengths.push(tokens.len() as u32);
                     // articles.push(article);
                     let mut doc_postings: HashMap<String, Vec<u32>> = HashMap::new();
                     for token in &tokens {
@@ -125,7 +130,6 @@ impl Indexer {
                 }
                 Err(e) => {
                     eprintln!("Error parsing object {}: {}", i + 1, e);
-                    // Optionally break or continue based on your needs
                 }
             }
         }
@@ -133,11 +137,7 @@ impl Indexer {
         Ok(())
     }
 
-    fn process_directory(
-        &mut self,
-        dir_path: &Path,
-        tx: &mpsc::Sender<Term>,
-    ) -> Result<u32, Box<dyn std::error::Error>> {
+    fn process_directory(&mut self, dir_path: &Path, tx: &mpsc::Sender<Term>) -> io::Result<u32> {
         let mut number_of_articles: u32 = 0;
 
         for entry in std::fs::read_dir(dir_path)? {
@@ -157,33 +157,45 @@ impl Indexer {
         Ok(number_of_articles)
     }
 
-    pub fn set_index_directory(&mut self, index_directory_path: String) {
+    pub fn set_index_directory_path(&mut self, index_directory_path: String) {
         self.index_directory_path = index_directory_path;
     }
+
+    pub fn set_result_directory_path(&mut self, result_directory_path: String) {
+        self.result_directory_path = result_directory_path;
+    }
+
+    pub fn get_index_directory_path(&self) -> String {
+        self.index_directory_path.clone()
+    }
+
+    pub fn get_result_directory_path(&self) -> String {
+        self.result_directory_path.clone()
+    }
     pub fn index(&mut self) -> io::Result<InMemoryIndex> {
-        let mut spmi = Spmi::new();
+        let mut spmi = Spmi::new(self.get_result_directory_path());
         let (tx, rx) = mpsc::channel::<Term>();
 
         let handle = std::thread::spawn(move || {
-            let _ = spmi.single_pass_in_memory_indexing(rx); // Use the moved variable
+            spmi.single_pass_in_memory_indexing(rx).unwrap();
         });
+        let index_path = self.get_index_directory_path();
+        let index_dir = Path::new(&index_path);
 
-        let wiki_dir = Path::new("enwiki-20171001-pages-meta-current-withlinks-processed");
-
-        let _ = self.process_directory(wiki_dir, &tx);
+        self.process_directory(index_dir, &tx)?;
         drop(tx);
         handle.join().unwrap();
-        let mut l_avg = 0;
-        for doc in &self.document_metadata {
-            l_avg += doc.1.doc_length;
+        let mut doc_avg = 0;
+        for doc_length in &self.document_lengths {
+            doc_avg += doc_length
         }
-        self.l_avg = ((l_avg as f64) / (self.doc_id as f64)) as f32;
-        spmi = Spmi::new();
+        self.avg_doc_length = ((doc_avg as f64) / (self.doc_id as f64)) as f32;
+        spmi = Spmi::new(self.get_result_directory_path());
         let result = spmi
             .merge_index_files(
-                self.l_avg,
+                self.avg_doc_length,
                 self.include_positions,
-                &self.document_metadata,
+                &self.document_lengths,
                 self.compression_algorithm.clone(),
                 64,
             )
@@ -192,12 +204,16 @@ impl Indexer {
         Ok(result)
     }
 
-    // pub fn get_term_metadata(&self, term: &str) -> &InMemoryTermMetadata {
-    //     self.in_memory_index.get_term_metadata(term)
-    // }
-
-    pub fn get_doc_metadata(&self, doc_id: u32) -> Option<&DocumentMetadata> {
-        self.document_metadata.get(&doc_id)
+    pub fn get_doc_metadata(&self, doc_id: u32) -> Option<DocumentMetadata> {
+        if doc_id <= self.document_lengths.len() as u32 {
+            Some(DocumentMetadata {
+                doc_name: self.document_names[(doc_id - 1) as usize].clone(),
+                doc_url: self.document_urls[(doc_id - 1) as usize].clone(),
+                doc_length: self.document_lengths[(doc_id - 1) as usize].clone(),
+            })
+        } else {
+            None
+        }
     }
 }
 

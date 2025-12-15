@@ -2,6 +2,7 @@ use std::u32;
 
 use crate::{
     query_processor::utils::BlockMaxIterator,
+    scoring::bm_25::{BM25Params, compute_term_score},
     utils::{
         chunk::Chunk, chunk_block_max_metadata::ChunkBlockMaxMetadata,
         chunk_iterator::ChunkIterator,
@@ -11,6 +12,7 @@ use crate::{
 pub struct TermIterator {
     pub term: String,
     pub term_id: u32,
+    pub term_frequency: u32,
     pub chunk_iterator: ChunkIterator,
     pub max_score: f32,
     pub block_max_iterator: BlockMaxIterator,
@@ -21,14 +23,16 @@ impl TermIterator {
     pub fn new(
         term: String,
         term_id: u32,
+        term_frequency: u32,
         chunks: Vec<Chunk>,
         max_score: f32,
         chunk_metadata: Vec<ChunkBlockMaxMetadata>,
     ) -> Self {
         Self {
             term,
-            chunk_iterator: ChunkIterator::new(chunks),
             term_id,
+            term_frequency,
+            chunk_iterator: ChunkIterator::new(chunks),
             max_score,
             block_max_iterator: BlockMaxIterator::new(chunk_metadata),
             is_complete: false,
@@ -86,8 +90,25 @@ impl TermIterator {
         }
         self.chunk_iterator.get_doc_id() as u64
     }
-    pub fn get_current_doc_score(&self) -> f32 {
-        self.chunk_iterator.get_doc_score()
+
+    pub fn get_current_doc_frequency(&self) -> u32 {
+        self.chunk_iterator.get_doc_frequency()
+    }
+    pub fn get_current_doc_score(
+        &self,
+        current_doc_length: &u32,
+        avg_doc_length: f32,
+        params: &BM25Params,
+        n: u32,
+    ) -> f32 {
+        compute_term_score(
+            self.get_current_doc_frequency(),
+            *current_doc_length,
+            avg_doc_length,
+            n,
+            self.term_frequency,
+            params,
+        )
     }
 
     pub fn get_max_score(&self) -> f32 {

@@ -7,8 +7,8 @@ pub mod wand;
 
 pub enum RankingAlgorithm {
     Wand,
-    Block_Max_Wand,
-    Block_Max_Max_Score,
-    Max_Score,
+    BlockMaxWand,
+    BlockMaxMaxScore,
+    MaxScore,
     Boolean,
 }

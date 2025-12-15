@@ -2,7 +2,6 @@ mod compressor;
 mod dictionary;
 mod in_memory_index;
 mod indexer;
-mod my_bk_tree;
 mod query_parser;
 mod query_processor;
 mod scoring;

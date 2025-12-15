@@ -1,6 +1,7 @@
 use crate::query_processor::term_iterator::TermIterator;
 
 // these are both conjunctive algorithms
+
 pub fn binary_merge(mut term_iterators: Vec<TermIterator>) -> Vec<u32> {
     term_iterators.sort_by(|a, b| a.get_no_of_postings().cmp(&b.get_no_of_postings()));
     let mut doc_ids;
@@ -21,6 +22,7 @@ pub fn binary_merge(mut term_iterators: Vec<TermIterator>) -> Vec<u32> {
     doc_ids
 }
 
+// supposedly faster
 pub fn holistic_binary_merge(mut term_iterators: Vec<TermIterator>) -> Vec<u32> {
     term_iterators.sort_by(|a, b| a.get_no_of_postings().cmp(&b.get_no_of_postings()));
     let mut current = term_iterators[0].get_current_doc_id();

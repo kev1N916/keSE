@@ -182,7 +182,7 @@ impl SearchTokenizer {
 
         let mut tokens = Vec::new();
         let mut position = 0;
-        let mut prev_lemma: Option<String> = None;
+        // let mut prev_lemma: Option<String> = None;
 
         for word in sentences.split_whitespace() {
             let cleaned_word = clean_word(word);
@@ -190,7 +190,7 @@ impl SearchTokenizer {
             if !cleaned_word.is_empty() {
                 let lemma = self.lemmatizer.lemmatize(&cleaned_word);
 
-                let current_lemma = match lemma {
+                match lemma {
                     Some(lemma) => {
                         tokens.push(Token {
                             position: position,
@@ -214,7 +214,7 @@ impl SearchTokenizer {
                 //     });
                 // }
 
-                prev_lemma = Some(current_lemma);
+                // prev_lemma = Some(current_lemma);
             }
 
             position = position + 1;
