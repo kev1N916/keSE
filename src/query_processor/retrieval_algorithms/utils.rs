@@ -2,7 +2,10 @@
 
 use std::cmp::Ordering;
 
-use crate::{indexer::spimi::ChunkBlockMaxMetadata, query_processor::term_iterator::TermIterator};
+use crate::{
+    query_processor::term_iterator::TermIterator,
+    utils::chunk_block_max_metadata::ChunkBlockMaxMetadata,
+};
 
 #[derive(Debug, PartialEq)]
 pub struct DocData {
@@ -41,33 +44,5 @@ pub fn swap_down(term_iterators: &mut Vec<TermIterator>, pivot: usize) {
     {
         term_iterators.swap(temp, temp + 1);
         temp += 1;
-    }
-}
-
-pub struct BlockMaxIterator {
-    block_index: usize,
-    blocks: Vec<ChunkBlockMaxMetadata>,
-}
-
-impl BlockMaxIterator {
-    pub fn new(blocks: Vec<ChunkBlockMaxMetadata>) -> Self {
-        Self {
-            block_index: 0,
-            blocks,
-        }
-    }
-
-    pub fn last(&self) -> u32 {
-        self.blocks[self.block_index].chunk_last_doc_id
-    }
-
-    pub fn score(&self) -> f32 {
-        self.blocks[self.block_index].chunk_max_term_score
-    }
-
-    pub fn advance(&mut self, doc_id: u32) {
-        while self.blocks[self.block_index].chunk_last_doc_id < doc_id {
-            self.block_index += 1;
-        }
     }
 }

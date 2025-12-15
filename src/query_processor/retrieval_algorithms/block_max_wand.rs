@@ -2,8 +2,8 @@ use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::u32;
 
-use crate::query_processor::algos::utils::{
-    BlockMaxIterator, DocData, FloatDoc, sort_by_doc_id, swap_down,
+use crate::query_processor::retrieval_algorithms::utils::{
+    DocData, FloatDoc, sort_by_doc_id, swap_down,
 };
 use crate::query_processor::term_iterator::TermIterator;
 
@@ -16,7 +16,6 @@ pub fn block_max_wand(mut term_iterators: Vec<TermIterator>) -> Vec<u32> {
         let mut score: f32 = 0.0;
         let mut pivot = 0;
         while pivot < term_iterators.len() {
-            // if term_iterators[pivot].get_current_doc_id()
             score += term_iterators[pivot].get_max_score();
             pivot += 1;
             if score > threshold {
@@ -33,13 +32,15 @@ pub fn block_max_wand(mut term_iterators: Vec<TermIterator>) -> Vec<u32> {
             pivot += 1;
         }
         let mut pivot_score = 0.0;
-        let mut next = u32::MAX;
+        let mut next = u64::MAX;
         for i in 0..pivot + 1 {
             // Shallow move
-            term_iterators[i].advance(pivot_id);
+            term_iterators[i]
+                .block_max_iterator
+                .advance(pivot_id as u32);
             pivot_score += term_iterators[i].get_block_max_score();
-            if term_iterators[i].get_last_block_doc_id() < next {
-                next = term_iterators[i].get_last_block_doc_id();
+            if (term_iterators[i].get_block_max_last_doc_id() as u64) < next {
+                next = term_iterators[i].get_block_max_last_doc_id() as u64;
             }
         }
         if pivot_score >= threshold {
@@ -58,7 +59,7 @@ pub fn block_max_wand(mut term_iterators: Vec<TermIterator>) -> Vec<u32> {
                     term_iterators[i].next();
                 }
                 pq.push(Reverse(FloatDoc(DocData {
-                    docid: pivot_id,
+                    docid: pivot_id as u32,
                     score,
                 })));
                 threshold = pq.peek().unwrap().0.0.score;
@@ -67,7 +68,7 @@ pub fn block_max_wand(mut term_iterators: Vec<TermIterator>) -> Vec<u32> {
                 while term_iterators[pivot].get_current_doc_id() == pivot_id {
                     pivot -= 1;
                 }
-                term_iterators[pivot].advance(pivot_id);
+                term_iterators[pivot].advance(pivot_id as u32);
                 swap_down(&mut term_iterators, pivot);
             }
         } else {
@@ -80,7 +81,7 @@ pub fn block_max_wand(mut term_iterators: Vec<TermIterator>) -> Vec<u32> {
             if next <= pivot_id {
                 next += 1;
             }
-            term_iterators[pivot].advance(next);
+            term_iterators[pivot].advance(next as u32);
             swap_down(&mut term_iterators, pivot);
         }
     }

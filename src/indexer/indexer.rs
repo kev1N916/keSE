@@ -1,8 +1,7 @@
 use crate::{
     compressor::compressor::CompressionAlgorithm,
-    in_memory_dict::map_in_memory_dict::{MapInMemoryDict, MapInMemoryDictPointer},
-    indexer::{index_metadata::InMemoryIndexMetatdata, spimi::Spmi},
-    my_bk_tree::BkTree,
+    in_memory_index::in_memory_index::InMemoryIndex,
+    indexer::spimi::Spmi,
     query_parser::tokenizer::SearchTokenizer,
     utils::{posting::Posting, term::Term},
 };
@@ -26,22 +25,6 @@ struct WikiArticle {
     id: String,
     title: String,
 }
-pub struct IndexMetadata {
-    bk_tree: BkTree,
-    in_memory_dictionary: MapInMemoryDict,
-    term_to_id_map: HashMap<String, u32>,
-}
-
-impl IndexMetadata {
-    pub fn new() -> Self {
-        Self {
-            bk_tree: BkTree::new(),
-            in_memory_dictionary: MapInMemoryDict::new(),
-            term_to_id_map: HashMap::new(),
-        }
-    }
-    pub fn add_term(term: String) {}
-}
 
 #[derive(Clone, Debug)]
 pub struct DocumentMetadata {
@@ -54,7 +37,7 @@ pub struct Indexer {
     doc_id: u32,
     include_positions: bool,
     document_metadata: HashMap<u32, DocumentMetadata>,
-    index_metadata: InMemoryIndexMetatdata,
+    // in_memory_index: InMemoryIndex,
     index_directory_path: String,
     search_tokenizer: SearchTokenizer,
     compression_algorithm: CompressionAlgorithm,
@@ -82,7 +65,7 @@ impl Indexer {
             doc_id: 0,
             include_positions: false,
             document_metadata: HashMap::new(),
-            index_metadata: InMemoryIndexMetatdata::new(),
+            // in_memory_index: InMemoryIndex::new(),
             index_directory_path: String::new(),
             search_tokenizer,
             compression_algorithm,
@@ -177,7 +160,7 @@ impl Indexer {
     pub fn set_index_directory(&mut self, index_directory_path: String) {
         self.index_directory_path = index_directory_path;
     }
-    pub fn index(&mut self) -> io::Result<()> {
+    pub fn index(&mut self) -> io::Result<InMemoryIndex> {
         let mut spmi = Spmi::new();
         let (tx, rx) = mpsc::channel::<Term>();
 
@@ -186,9 +169,8 @@ impl Indexer {
         });
 
         let wiki_dir = Path::new("enwiki-20171001-pages-meta-current-withlinks-processed");
-        let pdf_dir = Path::new("pdfs");
 
-        let _ = self.process_directory(pdf_dir, &tx);
+        let _ = self.process_directory(wiki_dir, &tx);
         drop(tx);
         handle.join().unwrap();
         let mut l_avg = 0;
@@ -200,20 +182,19 @@ impl Indexer {
         let result = spmi
             .merge_index_files(
                 self.l_avg,
-                self.doc_id,
                 self.include_positions,
                 &self.document_metadata,
                 self.compression_algorithm.clone(),
                 64,
             )
             .unwrap();
-        self.index_metadata = result;
-        Ok(())
+        // self.in_memory_index = result;
+        Ok(result)
     }
 
-    pub fn get_term_metadata(&self, term: &str) -> &MapInMemoryDictPointer {
-        self.index_metadata.get_term_metadata(term)
-    }
+    // pub fn get_term_metadata(&self, term: &str) -> &InMemoryTermMetadata {
+    //     self.in_memory_index.get_term_metadata(term)
+    // }
 
     pub fn get_doc_metadata(&self, doc_id: u32) -> Option<&DocumentMetadata> {
         self.document_metadata.get(&doc_id)

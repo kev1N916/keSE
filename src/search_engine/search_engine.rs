@@ -7,10 +7,11 @@ use search_engine_cache::CacheType;
 
 use crate::{
     compressor::compressor::CompressionAlgorithm,
+    in_memory_index::in_memory_index::InMemoryIndex,
     indexer::indexer::{DocumentMetadata, Indexer},
     query_parser::tokenizer::SearchTokenizer,
-    query_processor::algos::RankingAlgorithm,
     query_processor::query_processor::QueryProcessor,
+    query_processor::retrieval_algorithms::*,
 };
 
 pub struct SearchEngine {
@@ -18,6 +19,7 @@ pub struct SearchEngine {
     query_processor: QueryProcessor,
     query_parser: SearchTokenizer,
     indexer: Indexer,
+    in_memory_index: InMemoryIndex,
     compression_algorithm: CompressionAlgorithm,
     index_directory_path: String,
 }
@@ -45,6 +47,7 @@ impl SearchEngine {
             query_cache: CacheType::new_landlord(20),
             query_processor,
             query_parser,
+            in_memory_index: InMemoryIndex::new(),
             indexer,
             compression_algorithm,
             index_directory_path,
@@ -52,7 +55,7 @@ impl SearchEngine {
     }
 
     pub fn build_index(&mut self) -> Result<(), io::Error> {
-        self.indexer.index()?;
+        self.in_memory_index = self.indexer.index()?;
         Ok(())
     }
 
@@ -83,7 +86,7 @@ impl SearchEngine {
             let mut query_terms = Vec::new();
             let mut query_metadata = Vec::new();
             for token in tokens.unigram {
-                query_metadata.push(self.indexer.get_term_metadata(&token.word));
+                query_metadata.push(self.in_memory_index.get_term_metadata(&token.word));
                 query_terms.push(token.word);
             }
 

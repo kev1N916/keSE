@@ -27,18 +27,16 @@ impl ChunkIterator {
         self.decoded_doc_ids.contains(&doc_id)
     }
 
-    pub fn advance(&mut self, doc_id: u32) -> bool {
+    pub fn advance(&mut self, doc_id: u32) {
         while self.current_chunk_index + 1 < self.chunks.len()
             && doc_id > self.chunks[self.current_chunk_index].max_doc_id
         {
             self.current_chunk_index += 1;
         }
 
-        if doc_id > self.chunks[self.current_chunk_index].max_doc_id {
+        if doc_id < self.chunks[self.current_chunk_index].max_doc_id {
             self.init();
-            return true;
         }
-        return false;
     }
 
     pub fn next(&mut self) -> bool {

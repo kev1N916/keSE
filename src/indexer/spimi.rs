@@ -8,13 +8,14 @@ use std::{
 use crate::{
     compressor::compressor::CompressionAlgorithm,
     dictionary::Dictionary,
+    in_memory_index::in_memory_index::InMemoryIndex,
     indexer::{
         helper::vb_encode_posting_list, index_merge_iterator::IndexMergeIterator,
-        index_merge_writer::MergedIndexBlockWriter, index_metadata::InMemoryIndexMetatdata,
-        indexer::DocumentMetadata,
+        index_merge_writer::MergedIndexBlockWriter, indexer::DocumentMetadata,
     },
     scoring::bm_25::{BM25Params, compute_term_score},
     utils::{
+        chunk_block_max_metadata::ChunkBlockMaxMetadata,
         posting::{Posting, merge_postings},
         term::Term,
     },
@@ -23,11 +24,7 @@ use crate::{
 pub struct Spmi {
     dictionary: Dictionary,
 }
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ChunkBlockMaxMetadata {
-    pub chunk_last_doc_id: u32,
-    pub chunk_max_term_score: f32,
-}
+
 impl Spmi {
     pub fn new() -> Self {
         Self {
@@ -58,18 +55,18 @@ impl Spmi {
     pub fn merge_index_files(
         &mut self,
         l_avg: f32,
-        n: u32,
         include_positions: bool,
         document_metadata: &HashMap<u32, DocumentMetadata>,
         compression_algorithm: CompressionAlgorithm,
         chunk_size: u8,
-    ) -> Result<InMemoryIndexMetatdata, io::Error> {
-        let mut in_memory_index_metadata: InMemoryIndexMetatdata = InMemoryIndexMetatdata::new();
+    ) -> Result<InMemoryIndex, io::Error> {
+        let mut in_memory_index: InMemoryIndex = InMemoryIndex::new();
         let final_index_file = File::create("final.idx")?;
         let mut merge_iterators = Self::scan_and_create_iterators("index_directory")?;
         if merge_iterators.is_empty() {
-            return Ok(in_memory_index_metadata);
+            return Ok(in_memory_index);
         }
+        in_memory_index.no_of_docs = document_metadata.len() as u32;
         let mut no_of_terms: u32 = 0;
         let mut index_merge_writer: MergedIndexBlockWriter = MergedIndexBlockWriter::new(
             final_index_file,
@@ -117,7 +114,8 @@ impl Spmi {
             for posting in &final_merged {
                 let f_dt = posting.positions.len() as u32;
                 let l_d = document_metadata.get(&posting.doc_id).unwrap().doc_length;
-                let term_score: f32 = compute_term_score(f_dt, l_d, l_avg, n, f_t, &params);
+                let term_score: f32 =
+                    compute_term_score(f_dt, l_d, l_avg, in_memory_index.no_of_docs, f_t, &params);
                 max_term_score = max_term_score.max(term_score);
                 chunk_max_term_score = chunk_max_term_score.max(term_score);
                 if (chunk_index + 1) % chunk_size == 0 {
@@ -136,25 +134,25 @@ impl Spmi {
                 });
             }
             index_merge_writer.add_term(no_of_terms, final_merged)?;
-            in_memory_index_metadata.set_term_id(&term, no_of_terms);
-            in_memory_index_metadata.set_max_term_score(&term, max_term_score);
-            in_memory_index_metadata.set_chunk_block_max_metadata(&term, chunk_metadata);
+            in_memory_index.set_term_id(&term, no_of_terms);
+            in_memory_index.set_max_term_score(&term, max_term_score);
+            in_memory_index.set_chunk_block_max_metadata(&term, chunk_metadata);
 
-            in_memory_index_metadata.add_term_to_bk_tree(term);
+            in_memory_index.add_term_to_bk_tree(term);
         }
 
         index_merge_writer.close()?;
-        for term in in_memory_index_metadata.get_all_terms() {
-            let term_id = in_memory_index_metadata.get_term_id(term.clone());
+        for term in in_memory_index.get_all_terms() {
+            let term_id = in_memory_index.get_term_id(term.clone());
             if term_id != 0 {
                 if let Some(term_metadata) = index_merge_writer.get_term_metadata(term_id) {
-                    in_memory_index_metadata.set_block_ids(&term, term_metadata.block_ids.clone());
-                    in_memory_index_metadata
-                        .set_term_frequency(&term, term_metadata.term_frequency);
+                    in_memory_index.set_block_ids(&term, term_metadata.block_ids.clone());
+                    in_memory_index.set_term_frequency(&term, term_metadata.term_frequency);
                 }
             }
         }
-        Ok(in_memory_index_metadata)
+        in_memory_index.no_of_terms = no_of_terms;
+        Ok(in_memory_index)
     }
 
     fn scan_and_create_iterators(directory: &str) -> io::Result<Vec<IndexMergeIterator>> {

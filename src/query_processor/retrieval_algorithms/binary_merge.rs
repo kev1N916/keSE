@@ -12,7 +12,7 @@ pub fn binary_merge(mut term_iterators: Vec<TermIterator>) -> Vec<u32> {
         let mut temp = Vec::new();
         for doc_id in &doc_ids {
             term_iterator.advance(*doc_id);
-            if term_iterator.get_current_doc_id() == *doc_id {
+            if term_iterator.get_current_doc_id() == *doc_id as u64 {
                 temp.push(*doc_id);
             }
         }
@@ -29,10 +29,10 @@ pub fn holistic_binary_merge(mut term_iterators: Vec<TermIterator>) -> Vec<u32> 
 
     while term_iterators[0].has_next() {
         while i < term_iterators.len() {
-            term_iterators[i].advance(current);
+            term_iterators[i].advance(current as u32);
             if term_iterators[i].get_current_doc_id() > current {
                 let doc_id_to_advance = term_iterators[i].get_current_doc_id();
-                term_iterators[0].advance(doc_id_to_advance);
+                term_iterators[0].advance(doc_id_to_advance as u32);
                 if term_iterators[0].get_current_doc_id() > doc_id_to_advance {
                     current = term_iterators[0].get_current_doc_id();
                 } else {
@@ -45,7 +45,7 @@ pub fn holistic_binary_merge(mut term_iterators: Vec<TermIterator>) -> Vec<u32> 
         }
 
         if i == term_iterators.len() {
-            doc_ids.push(current);
+            doc_ids.push(current as u32);
             term_iterators[0].next();
             current = term_iterators[0].get_current_doc_id();
             i = 1;

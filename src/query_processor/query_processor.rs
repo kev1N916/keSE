@@ -9,15 +9,14 @@ use search_engine_cache::CacheType;
 
 use crate::{
     compressor::compressor::CompressionAlgorithm,
-    in_memory_dict::map_in_memory_dict::MapInMemoryDictPointer,
     query_processor::{
-        algos::{
-            RankingAlgorithm, block_max_max_score::block_max_max_score,
+        retrieval_algorithms::{
+            RankingAlgorithm, binary_merge::binary_merge, block_max_max_score::block_max_max_score,
             block_max_wand::block_max_wand, max_score::max_score, wand::wand,
         },
         term_iterator::TermIterator,
     },
-    utils::block::Block,
+    utils::{block::Block, in_memory_term_metadata::InMemoryTermMetadata},
 };
 
 pub struct QueryProcessor {
@@ -90,7 +89,7 @@ impl QueryProcessor {
     pub fn process_query(
         &mut self,
         query_terms: Vec<String>,
-        query_metadata: Vec<&MapInMemoryDictPointer>,
+        query_metadata: Vec<&InMemoryTermMetadata>,
     ) -> Vec<u32> {
         let mut term_iterators: Vec<TermIterator> = Vec::new();
         let mut reader: BufReader<&mut File> = BufReader::new(&mut self.inverted_index_file);
@@ -140,6 +139,7 @@ impl QueryProcessor {
             RankingAlgorithm::Block_Max_Wand => block_max_wand(term_iterators),
             RankingAlgorithm::Max_Score => max_score(term_iterators),
             RankingAlgorithm::Wand => wand(term_iterators),
+            RankingAlgorithm::Boolean => binary_merge(term_iterators),
         }
     }
 }

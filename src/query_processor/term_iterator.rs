@@ -1,7 +1,11 @@
+use std::u32;
+
 use crate::{
-    indexer::spimi::ChunkBlockMaxMetadata,
-    query_processor::algos::utils::BlockMaxIterator,
-    utils::{chunk::Chunk, chunk_iterator::ChunkIterator},
+    query_processor::utils::BlockMaxIterator,
+    utils::{
+        chunk::Chunk, chunk_block_max_metadata::ChunkBlockMaxMetadata,
+        chunk_iterator::ChunkIterator,
+    },
 };
 
 pub struct TermIterator {
@@ -10,7 +14,7 @@ pub struct TermIterator {
     pub chunk_iterator: ChunkIterator,
     pub max_score: f32,
     pub block_max_iterator: BlockMaxIterator,
-    // pub chunk_metadata: Vec<ChunkBlockMaxMetadata>,
+    pub is_complete: bool,
 }
 
 impl TermIterator {
@@ -27,6 +31,7 @@ impl TermIterator {
             term_id,
             max_score,
             block_max_iterator: BlockMaxIterator::new(chunk_metadata),
+            is_complete: false,
         }
     }
 
@@ -43,7 +48,15 @@ impl TermIterator {
     }
 
     pub fn next(&mut self) -> bool {
-        self.chunk_iterator.next()
+        let has_next = self.chunk_iterator.next();
+        if !has_next {
+            self.is_complete = true;
+        }
+        has_next
+    }
+
+    pub fn is_complete(&mut self) -> bool {
+        self.is_complete
     }
 
     pub fn has_next(&mut self) -> bool {
@@ -53,19 +66,25 @@ impl TermIterator {
     pub fn contains_doc_id(&self, doc_id: u32) -> bool {
         self.chunk_iterator.contains_doc_id(doc_id)
     }
-    pub fn advance(&mut self, doc_id: u32) -> bool {
-        self.chunk_iterator.advance(doc_id)
+    pub fn advance(&mut self, doc_id: u32) {
+        self.chunk_iterator.advance(doc_id);
+        while self.get_current_doc_id() < doc_id as u64 {
+            self.next();
+        }
     }
     pub fn get_all_doc_ids(&mut self) -> Vec<u32> {
         let mut doc_ids = Vec::new();
-        doc_ids.push(self.get_current_doc_id());
-        while self.next() {
-            doc_ids.push(self.get_current_doc_id());
+        doc_ids.push(self.get_current_doc_id() as u32);
+        while self.next() && !self.is_complete() {
+            doc_ids.push(self.get_current_doc_id() as u32);
         }
         doc_ids
     }
-    pub fn get_current_doc_id(&self) -> u32 {
-        self.chunk_iterator.get_doc_id()
+    pub fn get_current_doc_id(&self) -> u64 {
+        if self.is_complete {
+            return u64::MAX;
+        }
+        self.chunk_iterator.get_doc_id() as u64
     }
     pub fn get_current_doc_score(&self) -> f32 {
         self.chunk_iterator.get_doc_score()
@@ -83,7 +102,7 @@ impl TermIterator {
         self.block_max_iterator.score()
     }
 
-    pub fn get_last_block_doc_id(&mut self) -> u32 {
+    pub fn get_block_max_last_doc_id(&mut self) -> u32 {
         self.block_max_iterator.last()
     }
 
