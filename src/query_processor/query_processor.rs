@@ -137,7 +137,9 @@ impl QueryProcessor {
                 query_metadata[i].chunk_block_max_metadata.clone(),
             ));
         }
-
+        for term_iterator in &mut term_iterators {
+            term_iterator.init();
+        }
         match self.ranking_algorithm {
             RankingAlgorithm::BlockMaxMaxScore => {
                 block_max_max_score(term_iterators, document_lengths, average_document_length)

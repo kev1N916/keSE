@@ -52,7 +52,7 @@ impl Compressor {
         }
     }
 
-    pub fn compress_list(&self, list: &Vec<u32>) -> Vec<u8> {
+    pub fn compress_list_with_difference(&self, list: &Vec<u32>) -> Vec<u8> {
         match self.compression_algorithm {
             CompressionAlgorithm::Simple9 => {
                 return simple9::compress(&transform_list_for_difference_encoding(list));
@@ -72,7 +72,7 @@ impl Compressor {
         }
     }
 
-    pub fn decompress_list(&self, list: &Vec<u8>) -> Vec<u32> {
+    pub fn decompress_list_with_difference(&self, list: &Vec<u8>) -> Vec<u32> {
         match self.compression_algorithm {
             CompressionAlgorithm::Simple9 => {
                 return transform_list_to_difference_encoding(simple9::decompress_from_bytes(list));
@@ -91,6 +91,47 @@ impl Compressor {
             }
             CompressionAlgorithm::VarByte => {
                 return transform_list_to_difference_encoding(var_byte::decompress(list));
+            }
+        }
+    }
+
+    pub fn compress_list(&self, list: &Vec<u32>) -> Vec<u8> {
+        match self.compression_algorithm {
+            CompressionAlgorithm::Simple9 => {
+                return simple9::compress(&list);
+            }
+            CompressionAlgorithm::Simple16 => {
+                return simple16::compress(&list);
+            }
+            CompressionAlgorithm::PforDelta => {
+                return p_for_delta::compress(&(list));
+            }
+            CompressionAlgorithm::RiceCoding => {
+                return rice::compress(&(list), None);
+            }
+            CompressionAlgorithm::VarByte => {
+                return var_byte::compress(&(list));
+            }
+        }
+    }
+
+    pub fn decompress_list(&self, list: &Vec<u8>) -> Vec<u32> {
+        match self.compression_algorithm {
+            CompressionAlgorithm::Simple9 => {
+                return simple9::decompress_from_bytes(list);
+            }
+            CompressionAlgorithm::Simple16 => {
+                return simple16::decompress_from_bytes(list);
+            }
+            CompressionAlgorithm::PforDelta => {
+                return p_for_delta::decompress(list);
+            }
+            CompressionAlgorithm::RiceCoding => {
+                // return transform_list_to_difference_encoding(rice::decompress(list));
+                Vec::new()
+            }
+            CompressionAlgorithm::VarByte => {
+                return var_byte::decompress(list);
             }
         }
     }
