@@ -155,41 +155,13 @@ impl MergedIndexBlockWriter {
         let mut current_chunk = Chunk::new(term, self.compression_algorithm.clone());
 
         let mut i = 0;
-        let mut wook = 0;
         loop {
             if current_chunk.no_of_postings >= self.chunk_size {
-                // if wook == 1 {
-                //     wook = 0;
-                // }
                 let chunk_bytes = current_chunk.encode();
-                // if wook == 1 {
-                //     println!("writing to block because chunk is full");
-                //     let mut current_chunk = Chunk::new(term, self.compression_algorithm.clone());
-                //     current_chunk.decode(&chunk_bytes[4..]);
-                //     println!("{:?}", current_chunk.get_posting_list(1));
-                //     println!("{:?}", current_chunk.get_doc_ids());
-                //     println!("{:?}", current_chunk.get_doc_frequencies());
 
-                //     wook = 0;
-                // }
-                // if wook == 1 {
-                println!("chunk size {}", chunk_bytes.len());
-                println!("space left {}", self.current_block.space_left());
-
-                println!("writing to block because chunk is full");
-                // wook = 0;
-                // }
                 if self.current_block.space_left() >= chunk_bytes.len() as u32 {
-                    // if wook == 1 {
-                    println!(" me here");
-                    // wook = 0;
-                    // }
                     self.current_block.add_chunk_bytes(chunk_bytes);
                 } else {
-                    if wook == 1 {
-                        println!("writing block tp disk");
-                        wook = 0;
-                    }
                     self.write_block_to_index_file()?;
                     self.current_block.reset();
                     self.current_block.add_term(term);
@@ -207,21 +179,8 @@ impl MergedIndexBlockWriter {
                 current_chunk.reset();
             }
             if i == postings.len() {
-                if wook == 1 {
-                    println!("writing to block because end of posting");
-                    wook = 0;
-                }
                 let chunk_bytes = current_chunk.encode();
-                println!("{} reached here", self.current_block.space_left());
                 if self.current_block.space_left() >= chunk_bytes.len() as u32 {
-                    println!("{} did this", chunk_bytes.len());
-                    // if wook == 1 {
-                    //     let mut current_chunk =
-                    //         Chunk::new(term, self.compression_algorithm.clone());
-                    //     current_chunk.decode(&chunk_bytes[4..]);
-                    //     println!("{:?}", current_chunk.get_posting_list(0));
-                    //     wook = 0;
-                    // }
                     self.current_block.add_chunk_bytes(chunk_bytes);
                 } else {
                     self.write_block_to_index_file()?;
@@ -237,19 +196,10 @@ impl MergedIndexBlockWriter {
             }
 
             let current_posting = &postings[i];
-            if current_posting.doc_id == 12900 {
-                wook = 1;
-                // println!("vsdvvds {}", self.current_block_no);
-                // println!("{}", self.current_block.current_block_size);
-                // println!("{:?}", current_posting.positions);
-            }
             current_chunk.add_doc_id(current_posting.doc_id);
             current_chunk.add_doc_frequency(current_posting.positions.len() as u32);
             if current_posting.positions.len() > 0 && self.include_positions {
                 current_chunk.add_doc_positions(current_posting.positions.clone());
-            }
-            if wook == 1 {
-                println!("{}", current_chunk.no_of_postings);
             }
             current_chunk.no_of_postings += 1;
             i += 1;
@@ -257,7 +207,6 @@ impl MergedIndexBlockWriter {
     }
 
     fn write_block_to_index_file(&mut self) -> io::Result<()> {
-        println!("dsusaduasj");
         let block_bytes = self.current_block.encode();
         self.file_writer.write_all(&block_bytes)?;
         self.file_writer.flush()?;

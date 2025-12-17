@@ -15,14 +15,17 @@ impl Dictionary {
         };
     }
 
+    // max size of dictionary in bytes
+    // we are keeping it as 1MB
     pub fn max_size(&self) -> u32 {
-        return 10000000;
+        return 1000000;
     }
     pub fn size(&self) -> u32 {
         self.current_size
     }
     pub fn clear(&mut self) {
         self.dictionary.clear();
+        self.current_size = 0;
     }
 
     pub fn does_term_already_exist(&mut self, term: &str) -> bool {
@@ -59,7 +62,7 @@ impl Dictionary {
         if let Some(postings_list) = self.dictionary.get_mut(term) {
             let posting_length = posting.positions.len() as u32;
             postings_list.push(posting);
-            self.current_size += 4 + 4 * posting_length;
+            self.current_size += 4 + 4 * posting_length + 4;
         }
     }
 

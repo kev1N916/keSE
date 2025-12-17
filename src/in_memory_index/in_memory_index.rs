@@ -7,6 +7,7 @@ use crate::{
 };
 
 pub struct InMemoryIndex {
+    pub no_of_blocks: u32,
     pub no_of_docs: u32,  // no of documents in the collection
     pub no_of_terms: u32, // no of terms in the collection
     pub bk_tree: BkTree,
@@ -16,6 +17,7 @@ pub struct InMemoryIndex {
 impl InMemoryIndex {
     pub fn new() -> Self {
         Self {
+            no_of_blocks: 0,
             no_of_docs: 0,
             no_of_terms: 0,
             bk_tree: BkTree::new(),
@@ -31,8 +33,16 @@ impl InMemoryIndex {
         self.in_memory_index_metadata.get_terms()
     }
 
-    pub fn get_term_id(&self, term: String) -> u32 {
+    pub fn get_term_id(&self, term: &str) -> u32 {
         self.in_memory_index_metadata.get_term_id(term)
+    }
+
+    pub fn get_term_frequency(&self, term: String) -> u32 {
+        self.in_memory_index_metadata.get_term_frequency(&term)
+    }
+
+    pub fn get_max_term_score(&self, term: String) -> f32 {
+        self.in_memory_index_metadata.get_max_term_score(&term)
     }
 
     pub fn add_term_to_bk_tree(&mut self, term: String) {
@@ -52,6 +62,11 @@ impl InMemoryIndex {
             .set_chunk_block_max_metadata(term, chunk_block_max_metadata);
     }
 
+    pub fn get_chunk_block_max_metadata(&self, term: &str) -> Option<&Vec<ChunkBlockMaxMetadata>> {
+        self.in_memory_index_metadata
+            .get_chunk_block_max_metadata(term)
+    }
+
     pub fn set_term_frequency(&mut self, term: &str, term_frequency: u32) {
         self.in_memory_index_metadata
             .set_term_frequency(term, term_frequency);
@@ -64,6 +79,10 @@ impl InMemoryIndex {
 
     pub fn set_block_ids(&mut self, term: &str, block_ids: Vec<u32>) {
         self.in_memory_index_metadata.set_block_ids(term, block_ids);
+    }
+
+    pub fn get_block_ids(&self, term: &str) -> Option<&Vec<u32>> {
+        self.in_memory_index_metadata.get_block_ids(term)
     }
 }
 
@@ -86,13 +105,13 @@ mod tests {
         let mut index = InMemoryIndex::new();
         index.set_term_id("hello", 42);
 
-        assert_eq!(index.get_term_id("hello".to_string()), 42);
+        assert_eq!(index.get_term_id("hello"), 42);
     }
 
     #[test]
     fn test_get_term_id_returns_zero_for_nonexistent_term() {
         let index = InMemoryIndex::new();
-        assert_eq!(index.get_term_id("nonexistent".to_string()), 0);
+        assert_eq!(index.get_term_id("nonexistent"), 0);
     }
 
     #[test]
@@ -215,9 +234,9 @@ mod tests {
         index.add_term_to_bk_tree("gamma".to_string());
 
         // Verify term IDs
-        assert_eq!(index.get_term_id("alpha".to_string()), 1);
-        assert_eq!(index.get_term_id("beta".to_string()), 2);
-        assert_eq!(index.get_term_id("gamma".to_string()), 3);
+        assert_eq!(index.get_term_id("alpha"), 1);
+        assert_eq!(index.get_term_id("beta"), 2);
+        assert_eq!(index.get_term_id("gamma"), 3);
 
         // Verify term frequencies
         assert_eq!(index.get_term_metadata("alpha").term_frequency, 10);

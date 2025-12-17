@@ -61,6 +61,5 @@ pub fn compute_term_score(
 ) -> f32 {
     let idf = compute_idf(n, f_t);
     let tf = compute_tf_bm25(f_td, doc_len, avg_doc_len, params);
-
     idf * tf
 }

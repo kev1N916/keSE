@@ -32,13 +32,12 @@ pub(crate) fn vb_encode_positions(positions: &Vec<u32>) -> Vec<u8> {
         if last_position == 0 {
             let mut bytes = vb_encode(position);
             vb_encoded_positions.append(&mut bytes);
-            last_position = *position
         } else {
-            let position_difference = position - last_position;
+            let position_difference = *position - last_position;
             let mut bytes = vb_encode(&position_difference);
             vb_encoded_positions.append(&mut bytes);
-            last_position = *position
         }
+        last_position = *position
     }
     vb_encoded_positions
 }

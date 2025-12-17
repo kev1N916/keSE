@@ -100,11 +100,9 @@ impl Chunk {
         if self.compressed_doc_positions.len() == 0 {
             return;
         }
-        if self.indexed_compressed_positions.len() > 0 {
-            self.indexed_compressed_positions.clear();
-        }
         let mut posting_list: &[u8] = &[];
         let mut i = 0;
+        let mut indexed_compressed_positions = Vec::new();
         while i < self.compressed_doc_positions.len() {
             let mut j = i;
             while j < self.compressed_doc_positions.len() && self.compressed_doc_positions[j] != 0 {
@@ -114,16 +112,10 @@ impl Chunk {
                 break;
             }
             posting_list = &self.compressed_doc_positions[i as usize..j as usize];
-            println!(
-                "{:?}",
-                self.compressor
-                    .decompress_list_with_difference(&posting_list.to_vec())
-            );
             i = j + 1;
-            self.indexed_compressed_positions
-                .push(posting_list.to_vec());
+            indexed_compressed_positions.push(posting_list.to_vec());
         }
-        self.compressed_doc_positions.clear();
+        self.indexed_compressed_positions = indexed_compressed_positions;
     }
 
     pub fn add_doc_id(&mut self, doc_id: u32) {
@@ -179,11 +171,6 @@ impl Chunk {
             doc_id_index += 1;
         }
         self.compressed_doc_ids = chunk_bytes[offset..doc_id_index].to_vec();
-        println!(
-            "{:?}",
-            self.compressor
-                .decompress_list_with_difference(&self.compressed_doc_ids)
-        );
         offset = doc_id_index + 1;
         let mut doc_frequncy_index = offset;
         while doc_frequncy_index < chunk_bytes.len() {
@@ -193,11 +180,6 @@ impl Chunk {
             doc_frequncy_index += 1;
         }
         self.compressed_doc_frequencies = chunk_bytes[offset..doc_frequncy_index].to_vec();
-        // println!(
-        //     "{:?}",
-        //     self.compressor
-        //         .decompress_list(&self.compressed_doc_frequencies)
-        // );
         self.compressed_doc_positions = chunk_bytes[doc_frequncy_index + 1..].to_vec();
         self.index_positions();
     }

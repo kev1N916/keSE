@@ -138,15 +138,14 @@ impl Block {
 
     pub fn init(&mut self, reader: &mut BufReader<&mut File>) -> io::Result<()> {
         let block_size = self.max_block_size as usize * 1000;
-        println!("block size {} block id {}", block_size, self.block_id);
         reader.seek(std::io::SeekFrom::Start(
             (self.block_id * block_size as u32).into(),
         ))?;
+        println!("block_size {}", block_size);
         let mut block_bytes: Vec<u8> = vec![0; block_size];
         reader.read(&mut block_bytes).unwrap();
         let no_of_terms_in_block = u32::from_le_bytes(block_bytes[0..4].try_into().unwrap());
         self.no_of_terms = no_of_terms_in_block;
-        println!("{}", no_of_terms_in_block);
         let mut offset = 4;
         let mut terms: Vec<u32> = Vec::new();
         for _ in 0..no_of_terms_in_block {
@@ -613,7 +612,7 @@ mod merged_index_block_writer_tests {
         let mut all_postings = Vec::new();
         for term_id in 1..=10 {
             let mut postings = Vec::new();
-            for i in 0..50 {
+            for i in 0..200 {
                 postings.push(create_test_posting(
                     (i + 1) * term_id * 10,
                     vec![1, 2, 3, 4],
@@ -661,7 +660,7 @@ mod merged_index_block_writer_tests {
                 }
             }
 
-            assert_eq!(postings_read.len(), 50);
+            assert_eq!(postings_read.len(), 200);
             assert_eq!(*expected_postings, postings_read);
         }
     }

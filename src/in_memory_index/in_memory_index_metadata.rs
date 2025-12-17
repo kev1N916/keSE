@@ -24,8 +24,8 @@ impl InMemoryIndexMetadata {
         keys
     }
 
-    pub fn get_term_id(&self, term: String) -> u32 {
-        if let Some(pointer) = self.term_metadata.get(&term) {
+    pub fn get_term_id(&self, term: &str) -> u32 {
+        if let Some(pointer) = self.term_metadata.get(term) {
             pointer.term_id
         } else {
             0
@@ -47,10 +47,24 @@ impl InMemoryIndexMetadata {
         }
     }
 
+    pub fn get_term_frequency(&self, term: &str) -> u32 {
+        if let Some(pointer) = self.term_metadata.get(term) {
+            return pointer.term_frequency;
+        }
+        0
+    }
+
     pub fn set_max_term_score(&mut self, term: &str, max_term_score: f32) {
         if let Some(pointer) = self.term_metadata.get_mut(term) {
             pointer.max_score = max_term_score;
         }
+    }
+
+    pub fn get_max_term_score(&self, term: &str) -> f32 {
+        if let Some(pointer) = self.term_metadata.get(term) {
+            return pointer.max_score;
+        }
+        0.0
     }
 
     pub fn set_chunk_block_max_metadata(
@@ -63,10 +77,24 @@ impl InMemoryIndexMetadata {
         }
     }
 
+    pub fn get_chunk_block_max_metadata(&self, term: &str) -> Option<&Vec<ChunkBlockMaxMetadata>> {
+        if let Some(pointer) = self.term_metadata.get(term) {
+            return Some(&pointer.chunk_block_max_metadata);
+        }
+        None
+    }
+
     pub fn set_block_ids(&mut self, term: &str, block_ids: Vec<u32>) {
         if let Some(pointer) = self.term_metadata.get_mut(term) {
             pointer.block_ids = block_ids;
         }
+    }
+
+    pub fn get_block_ids(&self, term: &str) -> Option<&Vec<u32>> {
+        if let Some(pointer) = self.term_metadata.get(term) {
+            return Some(&pointer.block_ids);
+        }
+        None
     }
 
     pub fn find(&mut self, term: &str) -> Option<&InMemoryTermMetadata> {
@@ -90,13 +118,13 @@ mod tests {
         let mut metadata = InMemoryIndexMetadata::new();
         metadata.set_term_id("hello", 42);
 
-        assert_eq!(metadata.get_term_id("hello".to_string()), 42);
+        assert_eq!(metadata.get_term_id("hello"), 42);
     }
 
     #[test]
     fn test_get_term_id_returns_zero_for_nonexistent_term() {
         let metadata = InMemoryIndexMetadata::new();
-        assert_eq!(metadata.get_term_id("nonexistent".to_string()), 0);
+        assert_eq!(metadata.get_term_id("nonexistent"), 0);
     }
 
     #[test]
@@ -242,9 +270,9 @@ mod tests {
         metadata.set_term_id("gamma", 3);
         metadata.set_term_frequency("gamma", 30);
 
-        assert_eq!(metadata.get_term_id("alpha".to_string()), 1);
-        assert_eq!(metadata.get_term_id("beta".to_string()), 2);
-        assert_eq!(metadata.get_term_id("gamma".to_string()), 3);
+        assert_eq!(metadata.get_term_id("alpha"), 1);
+        assert_eq!(metadata.get_term_id("beta"), 2);
+        assert_eq!(metadata.get_term_id("gamma"), 3);
 
         assert_eq!(metadata.get_term_metadata("alpha").term_frequency, 10);
         assert_eq!(metadata.get_term_metadata("beta").term_frequency, 20);
