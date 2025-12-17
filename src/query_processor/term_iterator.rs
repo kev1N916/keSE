@@ -92,7 +92,6 @@ impl TermIterator {
     }
     pub fn get_current_doc_id(&self) -> u64 {
         if self.is_complete {
-            println!("somehow i have reached here");
             return u64::MAX;
         }
         self.chunk_iterator.get_doc_id() as u64

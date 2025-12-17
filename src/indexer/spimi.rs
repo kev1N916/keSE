@@ -88,6 +88,7 @@ impl Spmi {
         let mut index_merge_writer: MergedIndexBlockWriter = MergedIndexBlockWriter::new(
             final_index_file,
             Some(chunk_size),
+            None,
             include_positions,
             compression_algorithm,
         );

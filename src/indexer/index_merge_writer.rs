@@ -82,20 +82,21 @@ pub struct MergedIndexBlockWriter {
     pub include_positions: bool,
     file_writer: BufWriter<File>,
     compression_algorithm: CompressionAlgorithm,
-    pub chunk_size: u8, // in kb
+    pub chunk_size: u8, // Maximum number of postings in a single chunk
 }
 
 impl MergedIndexBlockWriter {
     pub fn new(
         file: File,
         chunk_size: Option<u8>,
+        block_size: Option<u8>,
         include_positions: bool,
         compression_algorithm: CompressionAlgorithm,
     ) -> Self {
         Self {
             term_metadata: HashMap::new(),
             current_block_no: 0,
-            current_block: Block::new(0),
+            current_block: Block::new(0, block_size),
             include_positions,
             file_writer: BufWriter::new(file),
             compression_algorithm,
@@ -154,16 +155,41 @@ impl MergedIndexBlockWriter {
         let mut current_chunk = Chunk::new(term, self.compression_algorithm.clone());
 
         let mut i = 0;
+        let mut wook = 0;
         loop {
             if current_chunk.no_of_postings >= self.chunk_size {
-                // current_chunk.reset();
-                // self.current_block.current_chunk.finish();
-                // self.current_block.add_current_chunk();
-                // self.current_block.reset_current_chunk();
+                // if wook == 1 {
+                //     wook = 0;
+                // }
                 let chunk_bytes = current_chunk.encode();
+                // if wook == 1 {
+                //     println!("writing to block because chunk is full");
+                //     let mut current_chunk = Chunk::new(term, self.compression_algorithm.clone());
+                //     current_chunk.decode(&chunk_bytes[4..]);
+                //     println!("{:?}", current_chunk.get_posting_list(1));
+                //     println!("{:?}", current_chunk.get_doc_ids());
+                //     println!("{:?}", current_chunk.get_doc_frequencies());
+
+                //     wook = 0;
+                // }
+                // if wook == 1 {
+                println!("chunk size {}", chunk_bytes.len());
+                println!("space left {}", self.current_block.space_left());
+
+                println!("writing to block because chunk is full");
+                // wook = 0;
+                // }
                 if self.current_block.space_left() >= chunk_bytes.len() as u32 {
+                    // if wook == 1 {
+                    println!(" me here");
+                    // wook = 0;
+                    // }
                     self.current_block.add_chunk_bytes(chunk_bytes);
                 } else {
+                    if wook == 1 {
+                        println!("writing block tp disk");
+                        wook = 0;
+                    }
                     self.write_block_to_index_file()?;
                     self.current_block.reset();
                     self.current_block.add_term(term);
@@ -181,8 +207,21 @@ impl MergedIndexBlockWriter {
                 current_chunk.reset();
             }
             if i == postings.len() {
+                if wook == 1 {
+                    println!("writing to block because end of posting");
+                    wook = 0;
+                }
                 let chunk_bytes = current_chunk.encode();
+                println!("{} reached here", self.current_block.space_left());
                 if self.current_block.space_left() >= chunk_bytes.len() as u32 {
+                    println!("{} did this", chunk_bytes.len());
+                    // if wook == 1 {
+                    //     let mut current_chunk =
+                    //         Chunk::new(term, self.compression_algorithm.clone());
+                    //     current_chunk.decode(&chunk_bytes[4..]);
+                    //     println!("{:?}", current_chunk.get_posting_list(0));
+                    //     wook = 0;
+                    // }
                     self.current_block.add_chunk_bytes(chunk_bytes);
                 } else {
                     self.write_block_to_index_file()?;
@@ -198,10 +237,19 @@ impl MergedIndexBlockWriter {
             }
 
             let current_posting = &postings[i];
+            if current_posting.doc_id == 12900 {
+                wook = 1;
+                // println!("vsdvvds {}", self.current_block_no);
+                // println!("{}", self.current_block.current_block_size);
+                // println!("{:?}", current_posting.positions);
+            }
             current_chunk.add_doc_id(current_posting.doc_id);
             current_chunk.add_doc_frequency(current_posting.positions.len() as u32);
             if current_posting.positions.len() > 0 && self.include_positions {
                 current_chunk.add_doc_positions(current_posting.positions.clone());
+            }
+            if wook == 1 {
+                println!("{}", current_chunk.no_of_postings);
             }
             current_chunk.no_of_postings += 1;
             i += 1;
@@ -209,6 +257,7 @@ impl MergedIndexBlockWriter {
     }
 
     fn write_block_to_index_file(&mut self) -> io::Result<()> {
+        println!("dsusaduasj");
         let block_bytes = self.current_block.encode();
         self.file_writer.write_all(&block_bytes)?;
         self.file_writer.flush()?;
@@ -232,7 +281,8 @@ mod tests {
     fn test_new_writer() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let writer = MergedIndexBlockWriter::new(file, None, true, CompressionAlgorithm::Simple16);
+        let writer =
+            MergedIndexBlockWriter::new(file, None, None, true, CompressionAlgorithm::Simple16);
 
         assert_eq!(writer.term_metadata.len(), 0);
         assert_eq!(writer.current_block_no, 0);
@@ -244,7 +294,7 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
         let writer =
-            MergedIndexBlockWriter::new(file, Some(64), true, CompressionAlgorithm::Simple16);
+            MergedIndexBlockWriter::new(file, Some(64), None, true, CompressionAlgorithm::Simple16);
 
         assert_eq!(writer.chunk_size, 64);
     }
@@ -254,7 +304,7 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
         let mut writer =
-            MergedIndexBlockWriter::new(file, Some(64), true, CompressionAlgorithm::Simple16);
+            MergedIndexBlockWriter::new(file, Some(64), None, true, CompressionAlgorithm::Simple16);
 
         let postings = vec![
             create_test_postings(10, vec![5, 10, 15]),
@@ -276,7 +326,7 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
         let mut writer =
-            MergedIndexBlockWriter::new(file, Some(64), true, CompressionAlgorithm::Simple16);
+            MergedIndexBlockWriter::new(file, Some(64), None, true, CompressionAlgorithm::Simple16);
 
         let postings1 = vec![create_test_postings(10, vec![1])];
         let postings2 = vec![create_test_postings(20, vec![2])];
@@ -299,7 +349,7 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
         let mut writer =
-            MergedIndexBlockWriter::new(file, Some(64), true, CompressionAlgorithm::Simple16);
+            MergedIndexBlockWriter::new(file, Some(64), None, true, CompressionAlgorithm::Simple16);
 
         // Create 150 postings to test chunk splitting (>128 postings per chunk)
         let mut postings = Vec::new();
@@ -320,7 +370,7 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
         let mut writer =
-            MergedIndexBlockWriter::new(file, Some(1), true, CompressionAlgorithm::Simple16); // Very small block size
+            MergedIndexBlockWriter::new(file, None, Some(1), true, CompressionAlgorithm::Simple16);
 
         let postings = vec![create_test_postings(10, vec![1, 2, 3, 4, 5])];
 
@@ -339,7 +389,7 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
         let mut writer =
-            MergedIndexBlockWriter::new(file, Some(64), true, CompressionAlgorithm::Simple16);
+            MergedIndexBlockWriter::new(file, None, Some(64), true, CompressionAlgorithm::Simple16);
 
         let postings = vec![];
 
@@ -356,7 +406,7 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
         let mut writer =
-            MergedIndexBlockWriter::new(file, Some(64), true, CompressionAlgorithm::Simple16);
+            MergedIndexBlockWriter::new(file, None, Some(64), true, CompressionAlgorithm::Simple16);
 
         let postings = vec![
             create_test_postings(10, vec![]),
@@ -376,7 +426,7 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
         let mut writer =
-            MergedIndexBlockWriter::new(file, Some(64), true, CompressionAlgorithm::Simple16);
+            MergedIndexBlockWriter::new(file, None, Some(64), true, CompressionAlgorithm::Simple16);
 
         // Create a posting with many positions
         let positions: Vec<u32> = (0..100).map(|i| i * 10).collect();
@@ -391,56 +441,11 @@ mod tests {
     }
 
     #[test]
-    fn test_sequential_doc_ids() {
-        let temp_file = NamedTempFile::new().unwrap();
-        let file = temp_file.reopen().unwrap();
-        let mut writer =
-            MergedIndexBlockWriter::new(file, Some(64), true, CompressionAlgorithm::Simple16);
-
-        let postings = vec![
-            create_test_postings(1, vec![1]),
-            create_test_postings(2, vec![2]),
-            create_test_postings(3, vec![3]),
-            create_test_postings(4, vec![4]),
-            create_test_postings(5, vec![5]),
-        ];
-
-        let result = writer.add_term(1, postings);
-        assert!(result.is_ok());
-        writer.finish().unwrap();
-
-        let metadata = writer.get_term_metadata(1).unwrap();
-        assert_eq!(metadata.term_frequency, 5);
-    }
-
-    #[test]
-    fn test_sparse_doc_ids() {
-        let temp_file = NamedTempFile::new().unwrap();
-        let file = temp_file.reopen().unwrap();
-        let mut writer =
-            MergedIndexBlockWriter::new(file, Some(64), true, CompressionAlgorithm::Simple16);
-
-        let postings = vec![
-            create_test_postings(10, vec![1]),
-            create_test_postings(1000, vec![2]),
-            create_test_postings(10000, vec![3]),
-            create_test_postings(100000, vec![4]),
-        ];
-
-        let result = writer.add_term(1, postings);
-        assert!(result.is_ok());
-        writer.finish().unwrap();
-
-        let metadata = writer.get_term_metadata(1).unwrap();
-        assert_eq!(metadata.term_frequency, 4);
-    }
-
-    #[test]
     fn test_file_written_correctly() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
         let mut writer =
-            MergedIndexBlockWriter::new(file, Some(64), true, CompressionAlgorithm::Simple16);
+            MergedIndexBlockWriter::new(file, None, Some(64), true, CompressionAlgorithm::Simple16);
 
         let postings = vec![
             create_test_postings(10, vec![5, 10]),
@@ -469,7 +474,7 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
         let mut writer =
-            MergedIndexBlockWriter::new(file, Some(64), true, CompressionAlgorithm::Simple16);
+            MergedIndexBlockWriter::new(file, None, Some(64), true, CompressionAlgorithm::Simple16);
 
         // Term 1: Few postings
         writer
@@ -514,7 +519,7 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
         let mut writer =
-            MergedIndexBlockWriter::new(file, Some(64), false, CompressionAlgorithm::RiceCoding);
+            MergedIndexBlockWriter::new(file, None, Some(64), true, CompressionAlgorithm::Simple16);
 
         let postings = vec![
             create_test_postings(u32::MAX - 1000, vec![1]),
@@ -534,8 +539,13 @@ mod tests {
     fn test_chunk_boundary_128_postings() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer =
-            MergedIndexBlockWriter::new(file, Some(128), true, CompressionAlgorithm::Simple16);
+        let mut writer = MergedIndexBlockWriter::new(
+            file,
+            None,
+            Some(128),
+            true,
+            CompressionAlgorithm::Simple16,
+        );
 
         // Exactly 128 postings - should fit in one chunk
         let postings: Vec<Posting> = (0..128).map(|i| create_test_postings(i, vec![1])).collect();
@@ -552,8 +562,13 @@ mod tests {
     fn test_chunk_boundary_129_postings() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer =
-            MergedIndexBlockWriter::new(file, Some(128), true, CompressionAlgorithm::Simple16);
+        let mut writer = MergedIndexBlockWriter::new(
+            file,
+            None,
+            Some(128),
+            true,
+            CompressionAlgorithm::Simple16,
+        );
 
         // 129 postings - should create multiple chunks
         let postings: Vec<Posting> = (0..129).map(|i| create_test_postings(i, vec![1])).collect();

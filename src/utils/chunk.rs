@@ -70,8 +70,12 @@ impl Chunk {
     }
 
     pub fn get_posting_list(&self, index: usize) -> Vec<u32> {
-        self.compressor
-            .decompress_list_with_difference(&self.indexed_compressed_positions[index])
+        if self.indexed_compressed_positions.len() > 0 {
+            return self
+                .compressor
+                .decompress_list_with_difference(&self.indexed_compressed_positions[index]);
+        }
+        Vec::new()
     }
 
     pub fn decode_doc_ids(&mut self) {
@@ -94,17 +98,27 @@ impl Chunk {
 
     pub fn index_positions(&mut self) {
         if self.compressed_doc_positions.len() == 0 {
-            println!("how did i reach here");
             return;
+        }
+        if self.indexed_compressed_positions.len() > 0 {
+            self.indexed_compressed_positions.clear();
         }
         let mut posting_list: &[u8] = &[];
         let mut i = 0;
         while i < self.compressed_doc_positions.len() {
             let mut j = i;
-            while self.compressed_doc_positions[j] != 0 {
+            while j < self.compressed_doc_positions.len() && self.compressed_doc_positions[j] != 0 {
                 j += 1;
             }
+            if j == i {
+                break;
+            }
             posting_list = &self.compressed_doc_positions[i as usize..j as usize];
+            println!(
+                "{:?}",
+                self.compressor
+                    .decompress_list_with_difference(&posting_list.to_vec())
+            );
             i = j + 1;
             self.indexed_compressed_positions
                 .push(posting_list.to_vec());
@@ -113,7 +127,8 @@ impl Chunk {
     }
 
     pub fn add_doc_id(&mut self, doc_id: u32) {
-        self.doc_ids.push(doc_id)
+        self.doc_ids.push(doc_id);
+        self.set_max_doc_id(doc_id);
     }
 
     pub fn add_doc_positions(&mut self, positions: Vec<u32>) {
@@ -129,7 +144,6 @@ impl Chunk {
         chunk_bytes.extend_from_slice(&self.size_of_chunk.to_le_bytes());
         chunk_bytes.extend_from_slice(&self.no_of_postings.to_le_bytes());
         chunk_bytes.extend_from_slice(&self.max_doc_id.to_le_bytes());
-
         chunk_bytes.extend(&self.compressor.compress_list_with_difference(&self.doc_ids));
         chunk_bytes.push(POSITIONS_DELIMITER);
         chunk_bytes.extend(&self.compressor.compress_list(&self.doc_frequencies));
@@ -165,6 +179,11 @@ impl Chunk {
             doc_id_index += 1;
         }
         self.compressed_doc_ids = chunk_bytes[offset..doc_id_index].to_vec();
+        println!(
+            "{:?}",
+            self.compressor
+                .decompress_list_with_difference(&self.compressed_doc_ids)
+        );
         offset = doc_id_index + 1;
         let mut doc_frequncy_index = offset;
         while doc_frequncy_index < chunk_bytes.len() {
@@ -174,6 +193,11 @@ impl Chunk {
             doc_frequncy_index += 1;
         }
         self.compressed_doc_frequencies = chunk_bytes[offset..doc_frequncy_index].to_vec();
+        // println!(
+        //     "{:?}",
+        //     self.compressor
+        //         .decompress_list(&self.compressed_doc_frequencies)
+        // );
         self.compressed_doc_positions = chunk_bytes[doc_frequncy_index + 1..].to_vec();
         self.index_positions();
     }
