@@ -30,22 +30,25 @@ pub struct Lemmatizer {
 }
 
 impl Lemmatizer {
-    pub fn lemmatize(&self, word: &str) -> Option<String> {
-        let is_word_present = self.lemmas.contains_key(word);
-        if !is_word_present {
-            return None;
-        } else {
-            Some(self.lemmas.get(word).unwrap().clone())
-        }
+    pub fn lemmatize(&self, word: &str) -> Option<&String> {
+        self.lemmas.get(word)
     }
 }
+const STOP_WORDS: &[&str] = &[
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "he", "in", "is", "it",
+    "its", "of", "on", "that", "the", "to", "was", "will", "with", "the", "this", "but", "they",
+    "have", "had", "what", "when", "where", "who", "which", "why", "how", "all", "each", "every",
+    "both", "few", "more", "most", "other", "some", "such", "no", "nor", "not", "only", "own",
+    "same", "so", "than", "too", "very", "can", "will", "just", "should", "now",
+];
 
 #[derive(Debug, Clone)]
 pub struct SearchTokenizer {
     lemmatizer: Lemmatizer,
+    stop_word_set: HashSet<String>,
 }
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
@@ -87,24 +90,19 @@ pub fn parse_lemma(file_path: &str) -> Result<HashMap<String, String>, io::Error
 }
 
 pub fn clean_word(word: &str) -> String {
-    return word
-        .to_lowercase()
-        .chars()
-        .skip_while(|c| !c.is_alphanumeric())
-        .collect::<String>()
-        .chars()
-        .rev()
-        .skip_while(|c| !c.is_alphanumeric())
-        .collect::<String>()
-        .chars()
-        .rev()
-        .collect();
+    // First trim, then lowercase (only lowercase what we need)
+    let trimmed = word.trim_matches(|c: char| !c.is_alphanumeric());
+    trimmed.to_lowercase()
+}
+
+pub fn is_pure_alphabets_with_hyphen(text: &str) -> bool {
+    !text.is_empty() && text.chars().all(|c| c.is_ascii_alphabetic() || c == '-')
 }
 
 pub struct TokenizeQueryResult {
     pub unigram: Vec<Token>,
-    pub bigram: Vec<Token>,
 }
+
 impl SearchTokenizer {
     pub fn new() -> Result<SearchTokenizer, io::Error> {
         let current_dir = env::current_dir()?;
@@ -114,110 +112,82 @@ impl SearchTokenizer {
         let lemmatizer_path = path.clone() + "/lemmas.txt";
 
         let lemmas = parse_lemma(&lemmatizer_path)?;
-        let lemmatizer = Lemmatizer { lemmas: lemmas };
+        let lemmatizer = Lemmatizer { lemmas };
+
+        // Initialize stop word set
+        let stop_word_set: HashSet<String> = STOP_WORDS.iter().map(|&s| s.to_string()).collect();
+
         Ok(SearchTokenizer {
-            lemmatizer: lemmatizer,
+            lemmatizer,
+            stop_word_set,
         })
     }
 
     pub fn tokenize_query(
         &self,
-        sentences: &String,
+        sentences: &str, // Changed from &String to &str
     ) -> Result<TokenizeQueryResult, TokenizationError> {
         if sentences.trim().is_empty() {
             return Err(TokenizationError::EmptyInput);
         }
 
         let mut unigram_tokens: Vec<Token> = Vec::new();
-        let mut bigram_tokens: Vec<Token> = Vec::new();
         let mut position = 0;
-        let mut prev_lemma: Option<String> = None;
 
         for word in sentences.split_whitespace() {
             let cleaned_word = clean_word(word);
 
-            if !cleaned_word.is_empty() {
-                let lemma = self.lemmatizer.lemmatize(&cleaned_word);
+            if !cleaned_word.is_empty()
+                && !self.stop_word_set.contains(&cleaned_word)
+                && is_pure_alphabets_with_hyphen(&cleaned_word)
+            {
+                // Get lemma or use cleaned_word, avoid cloning in the match
+                let token_word = self
+                    .lemmatizer
+                    .lemmatize(&cleaned_word)
+                    .unwrap_or(&cleaned_word); // Only clone once here
 
-                let current_lemma = match lemma {
-                    Some(lemma) => {
-                        unigram_tokens.push(Token {
-                            position,
-                            word: lemma.clone(),
-                        });
-                        lemma
-                    }
-                    None => {
-                        unigram_tokens.push(Token {
-                            position,
-                            word: cleaned_word.clone(),
-                        });
-                        cleaned_word.clone()
-                    }
-                };
-
-                if let Some(prev) = &prev_lemma {
-                    bigram_tokens.push(Token {
-                        position: position - 1,
-                        word: format!("{} {}", prev, current_lemma),
-                    });
-                }
-
-                prev_lemma = Some(current_lemma);
+                unigram_tokens.push(Token {
+                    position,
+                    word: token_word.to_string(),
+                });
             }
 
-            position = position + 1;
+            position += 1;
         }
 
         Ok(TokenizeQueryResult {
             unigram: unigram_tokens,
-            bigram: bigram_tokens,
         })
     }
 
-    pub fn tokenize(&self, sentences: String) -> Vec<Token> {
+    pub fn tokenize(&self, sentences: &str) -> Vec<Token> {
         if sentences.trim().is_empty() {
             return Vec::new();
         }
 
         let mut tokens = Vec::new();
         let mut position = 0;
-        // let mut prev_lemma: Option<String> = None;
 
         for word in sentences.split_whitespace() {
             let cleaned_word = clean_word(word);
 
-            if !cleaned_word.is_empty() {
-                let lemma = self.lemmatizer.lemmatize(&cleaned_word);
+            if !cleaned_word.is_empty()
+                && !self.stop_word_set.contains(&cleaned_word)
+                && is_pure_alphabets_with_hyphen(&cleaned_word)
+            {
+                let token_word = self
+                    .lemmatizer
+                    .lemmatize(&cleaned_word)
+                    .unwrap_or(&cleaned_word);
 
-                match lemma {
-                    Some(lemma) => {
-                        tokens.push(Token {
-                            position: position,
-                            word: lemma.clone(),
-                        });
-                        lemma
-                    }
-                    None => {
-                        tokens.push(Token {
-                            position: position,
-                            word: cleaned_word.clone(),
-                        });
-                        cleaned_word.clone()
-                    }
-                };
-
-                // if let Some(prev) = &prev_lemma {
-                //     tokens.push(Token {
-                //         position: position - 1,
-                //         word: format!("{} {}", prev, current_lemma),
-                //     });
-                // }
-
-                // prev_lemma = Some(current_lemma);
+                tokens.push(Token {
+                    position,
+                    word: token_word.to_string(),
+                });
             }
 
-            position = position + 1;
+            position += 1;
         }
 
         tokens

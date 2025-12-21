@@ -1,28 +1,37 @@
 use std::{
     fs::File,
-    io::{self, Read, Seek},
+    io::{self, BufReader, ErrorKind, Read, Seek},
+    time::SystemTime,
 };
 
 use crate::{indexer::helper::vb_decode_posting_list, utils::posting::Posting};
 
 pub struct IndexMergeIterator {
     no_of_terms: u32,
-    file: File,
+    file_reader: BufReader<File>,
     current_term_no: u32,
+    buffered_terms: Vec<String>,
+    buffered_postings: Vec<Vec<u8>>,
+    current_buffer_index: usize,
     pub current_term: Option<String>,
     pub current_postings: Option<Vec<Posting>>,
     current_offset: u32,
+    read_buffer: Vec<u8>,
 }
 
 impl IndexMergeIterator {
-    pub fn new(file: File) -> IndexMergeIterator {
+    pub fn new(file_reader: BufReader<File>) -> IndexMergeIterator {
         IndexMergeIterator {
-            file,
+            file_reader,
             no_of_terms: 0,
             current_term_no: 0,
             current_term: None,
             current_postings: None,
             current_offset: 0,
+            current_buffer_index: 0,
+            buffered_postings: Vec::with_capacity(100),
+            buffered_terms: Vec::with_capacity(100),
+            read_buffer: Vec::with_capacity(1024),
         }
     }
 
@@ -31,10 +40,10 @@ impl IndexMergeIterator {
     }
 
     pub fn init(&mut self) -> io::Result<()> {
-        self.file.seek(std::io::SeekFrom::Start(0))?;
+        self.file_reader.seek(std::io::SeekFrom::Start(0))?;
         let mut buf = [0u8; 4];
 
-        self.file.read_exact(&mut buf)?;
+        self.file_reader.read_exact(&mut buf)?;
 
         self.no_of_terms = u32::from_le_bytes(buf);
 
@@ -45,38 +54,79 @@ impl IndexMergeIterator {
         Ok(())
     }
 
+    fn advance(&mut self) -> io::Result<()> {
+        let previous_offset = self.current_offset;
+
+        // Keep capacity but clear contents
+        self.buffered_postings.clear();
+        self.buffered_terms.clear();
+
+        const BUFFER_SIZE: u32 = 3_000_000;
+
+        while (self.current_offset - previous_offset) < BUFFER_SIZE {
+            let mut buf = [0u8; 4];
+
+            // Check for EOF
+            if let Err(e) = self.file_reader.read_exact(&mut buf) {
+                if e.kind() == ErrorKind::UnexpectedEof {
+                    return Ok(());
+                } else {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("Error reading file during advance: {}", e),
+                    ));
+                }
+            }
+
+            let string_length = u32::from_le_bytes(buf) as usize;
+            self.current_offset += 4;
+
+            // Reuse read_buffer
+            self.read_buffer.clear();
+            self.read_buffer.resize(string_length, 0);
+            self.file_reader.read_exact(&mut self.read_buffer)?;
+
+            self.buffered_terms.push(
+                String::from_utf8(self.read_buffer.clone())
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
+            );
+            self.current_offset += string_length as u32;
+
+            self.file_reader.read_exact(&mut buf)?;
+            let postings_length = u32::from_le_bytes(buf) as usize;
+            self.current_offset += 4;
+
+            // Reuse read_buffer for postings
+            self.read_buffer.clear();
+            self.read_buffer.resize(postings_length, 0);
+            self.file_reader.read_exact(&mut self.read_buffer)?;
+
+            self.buffered_postings.push(self.read_buffer.clone());
+            self.current_offset += postings_length as u32;
+        }
+
+        Ok(())
+    }
+
     pub fn next(&mut self) -> io::Result<bool> {
         if self.current_term_no >= self.no_of_terms {
             self.current_term = None;
             self.current_postings = None;
             return Ok(false);
         }
-        let mut buf = [0u8; 4];
 
-        self.file.read_exact(&mut buf)?;
-        let string_length = u32::from_le_bytes(buf) as usize;
-        self.current_offset += 4;
-
-        let mut string_buf = vec![0u8; string_length];
-        self.file.read_exact(&mut string_buf)?;
-        self.current_term = Some(
-            String::from_utf8(string_buf)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
-        );
-        self.current_offset += string_length as u32;
-
-        self.file.read_exact(&mut buf)?;
-        let postings_length = u32::from_le_bytes(buf) as usize;
-        self.current_offset += 4;
-
-        let mut postings_buf = vec![0u8; postings_length];
-        self.file.read_exact(&mut postings_buf)?;
-        let posting_list = vb_decode_posting_list(&postings_buf);
-        self.current_postings = Some(posting_list);
-        self.current_offset += postings_length as u32;
-
+        if self.current_buffer_index == self.buffered_terms.len() {
+            self.advance().unwrap();
+            self.current_buffer_index = 0;
+        }
+        self.current_term = Some(std::mem::take(
+            &mut self.buffered_terms[self.current_buffer_index],
+        ));
+        self.current_postings = Some(vb_decode_posting_list(
+            &self.buffered_postings[self.current_buffer_index],
+        ));
         self.current_term_no += 1;
-
+        self.current_buffer_index += 1;
         Ok(true)
     }
 }
@@ -125,7 +175,8 @@ mod tests {
 
         let temp_file = create_test_index_file(vec![("apple", postings.clone())]);
         let file = temp_file.reopen().unwrap();
-        let mut iterator = IndexMergeIterator::new(file);
+        let file_reader = BufReader::new(file);
+        let mut iterator = IndexMergeIterator::new(file_reader);
 
         iterator.init().unwrap();
 
@@ -157,7 +208,8 @@ mod tests {
         ]);
 
         let file = temp_file.reopen().unwrap();
-        let mut iterator = IndexMergeIterator::new(file);
+        let file_reader = BufReader::new(file);
+        let mut iterator = IndexMergeIterator::new(file_reader);
 
         iterator.init().unwrap();
 
@@ -185,7 +237,8 @@ mod tests {
     fn test_empty_index() {
         let temp_file = create_test_index_file(vec![]);
         let file = temp_file.reopen().unwrap();
-        let mut iterator = IndexMergeIterator::new(file);
+        let file_reader = BufReader::new(file);
+        let mut iterator = IndexMergeIterator::new(file_reader);
 
         iterator.init().unwrap();
 
@@ -200,7 +253,8 @@ mod tests {
 
         let temp_file = create_test_index_file(vec![("empty", postings)]);
         let file = temp_file.reopen().unwrap();
-        let mut iterator = IndexMergeIterator::new(file);
+        let file_reader = BufReader::new(file);
+        let mut iterator = IndexMergeIterator::new(file_reader);
 
         iterator.init().unwrap();
 
@@ -231,7 +285,8 @@ mod tests {
 
         let temp_file = create_test_index_file(vec![("test", postings.clone())]);
         let file = temp_file.reopen().unwrap();
-        let mut iterator = IndexMergeIterator::new(file);
+        let file_reader = BufReader::new(file);
+        let mut iterator = IndexMergeIterator::new(file_reader);
 
         iterator.init().unwrap();
 
@@ -253,7 +308,8 @@ mod tests {
 
         let temp_file = create_test_index_file(vec![("café", postings)]);
         let file = temp_file.reopen().unwrap();
-        let mut iterator = IndexMergeIterator::new(file);
+        let file_reader = BufReader::new(file);
+        let mut iterator = IndexMergeIterator::new(file_reader);
 
         iterator.init().unwrap();
 
@@ -270,33 +326,12 @@ mod tests {
 
         let temp_file = create_test_index_file(vec![(&long_term, postings)]);
         let file = temp_file.reopen().unwrap();
-        let mut iterator = IndexMergeIterator::new(file);
+        let file_reader = BufReader::new(file);
+        let mut iterator = IndexMergeIterator::new(file_reader);
 
         iterator.init().unwrap();
 
         assert_eq!(iterator.current_term, Some(long_term));
-    }
-
-    #[test]
-    fn test_offset_tracking() {
-        let postings = vec![Posting {
-            doc_id: 1,
-            positions: vec![2, 4],
-        }];
-
-        let temp_file =
-            create_test_index_file(vec![("a", postings.clone()), ("b", postings.clone())]);
-
-        let file = temp_file.reopen().unwrap();
-        let mut iterator = IndexMergeIterator::new(file);
-
-        iterator.init().unwrap();
-
-        let offset_after_first = iterator.current_offset;
-        assert!(offset_after_first > 4); // Should be past the header
-
-        iterator.next().unwrap();
-        assert!(iterator.current_offset > offset_after_first);
     }
 
     #[test]
@@ -308,7 +343,8 @@ mod tests {
 
         let temp_file = create_test_index_file(vec![("single", postings)]);
         let file = temp_file.reopen().unwrap();
-        let mut iterator = IndexMergeIterator::new(file);
+        let file_reader = BufReader::new(file);
+        let mut iterator = IndexMergeIterator::new(file_reader);
 
         iterator.init().unwrap();
 
@@ -331,7 +367,8 @@ mod tests {
 
         let temp_file = create_test_index_file(vec![("frequent", postings.clone())]);
         let file = temp_file.reopen().unwrap();
-        let mut iterator = IndexMergeIterator::new(file);
+        let file_reader = BufReader::new(file);
+        let mut iterator = IndexMergeIterator::new(file_reader);
 
         iterator.init().unwrap();
 
@@ -353,7 +390,8 @@ mod tests {
 
         let temp_file = create_test_index_file(vec![("rare", postings)]);
         let file = temp_file.reopen().unwrap();
-        let mut iterator = IndexMergeIterator::new(file);
+        let file_reader = BufReader::new(file);
+        let mut iterator = IndexMergeIterator::new(file_reader);
 
         iterator.init().unwrap();
 

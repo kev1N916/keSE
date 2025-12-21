@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     fs::File,
     io::{self, BufWriter, Write},
+    time::SystemTime,
 };
 
 use crate::{
@@ -76,6 +77,7 @@ impl TermMetadata {
     }
 }
 pub struct MergedIndexBlockWriter {
+    buffered_block_bytes: Vec<u8>,
     pub term_metadata: HashMap<u32, TermMetadata>,
     pub current_block_no: u32,
     pub current_block: Block,
@@ -94,6 +96,7 @@ impl MergedIndexBlockWriter {
         compression_algorithm: CompressionAlgorithm,
     ) -> Self {
         Self {
+            buffered_block_bytes: Vec::with_capacity(5_000_000),
             term_metadata: HashMap::new(),
             current_block_no: 0,
             current_block: Block::new(0, block_size),
@@ -108,7 +111,12 @@ impl MergedIndexBlockWriter {
     }
 
     pub fn finish(&mut self) -> io::Result<()> {
-        self.write_block_to_index_file()
+        let block_bytes = self.current_block.encode();
+        self.buffered_block_bytes.extend(block_bytes);
+        self.file_writer.write_all(&self.buffered_block_bytes)?;
+        self.flush()?;
+        self.current_block_no += 1;
+        Ok(())
     }
 
     pub fn close(&mut self) -> io::Result<()> {
@@ -126,18 +134,16 @@ impl MergedIndexBlockWriter {
         }
     }
     fn initialize_term_metadata(&mut self, term: u32) {
-        self.term_metadata.insert(
-            term,
-            TermMetadata {
-                block_ids: Vec::new(),
-                term_frequency: 0,
-            },
-        );
+        self.term_metadata.entry(term).or_insert(TermMetadata {
+            block_ids: Vec::new(),
+            term_frequency: 0,
+        });
     }
     pub fn get_term_metadata(&self, term: u32) -> Option<&TermMetadata> {
         self.term_metadata.get(&term)
     }
     pub fn add_term(&mut self, term: u32, postings: Vec<Posting>) -> io::Result<()> {
+        // let current_time = SystemTime::now();
         // if it is not possible to add a new term to the block then we will reset the block
         // the minimum number of bytes necessary to add a new term is 6 bytes for term and term_offset
         // 9 bytes for the empty chunk
@@ -155,6 +161,9 @@ impl MergedIndexBlockWriter {
         let mut current_chunk = Chunk::new(term, self.compression_algorithm.clone());
 
         let mut i = 0;
+        let postings_length = postings.len();
+
+        let mut postings_iter = postings.into_iter();
         loop {
             if current_chunk.no_of_postings >= self.chunk_size {
                 let chunk_bytes = current_chunk.encode();
@@ -172,34 +181,65 @@ impl MergedIndexBlockWriter {
                     self.current_block.add_chunk_bytes(chunk_bytes);
                 }
 
-                if i == postings.len() {
+                if i == postings_length {
+                    let now_time = SystemTime::now();
+
+                    // println!(
+                    //     "time taken to complete add_term is  {:?}",
+                    //     now_time.duration_since(current_time)
+                    // );
                     return Ok(());
                 }
 
                 current_chunk.reset();
             }
-            if i == postings.len() {
-                let chunk_bytes = current_chunk.encode();
-                if self.current_block.space_left() >= chunk_bytes.len() as u32 {
-                    self.current_block.add_chunk_bytes(chunk_bytes);
-                } else {
-                    self.write_block_to_index_file()?;
-                    self.current_block.reset();
-                    self.current_block.add_term(term);
-                    self.add_block_to_term_metadata(term, self.current_block_no);
-                    if chunk_bytes.len() as u32 > self.current_block.space_left() {
-                        panic!("chunk cannot fit in block")
-                    }
-                    self.current_block.add_chunk_bytes(chunk_bytes);
-                }
-                return Ok(());
-            }
+            // if i == postings.len() {
+            //     let chunk_bytes = current_chunk.encode();
+            //     if self.current_block.space_left() >= chunk_bytes.len() as u32 {
+            //         self.current_block.add_chunk_bytes(chunk_bytes);
+            //     } else {
+            //         self.write_block_to_index_file()?;
+            //         self.current_block.reset();
+            //         self.current_block.add_term(term);
+            //         self.add_block_to_term_metadata(term, self.current_block_no);
+            //         if chunk_bytes.len() as u32 > self.current_block.space_left() {
+            //             panic!("chunk cannot fit in block")
+            //         }
+            //         self.current_block.add_chunk_bytes(chunk_bytes);
+            //     }
+            //     return Ok(());
+            // }
 
-            let current_posting = &postings[i];
+            let current_posting = match postings_iter.next() {
+                Some(p) => p,
+                None => {
+                    let chunk_bytes = current_chunk.encode();
+                    if self.current_block.space_left() >= chunk_bytes.len() as u32 {
+                        self.current_block.add_chunk_bytes(chunk_bytes);
+                    } else {
+                        self.write_block_to_index_file()?;
+                        self.current_block.reset();
+                        self.current_block.add_term(term);
+                        self.add_block_to_term_metadata(term, self.current_block_no);
+                        if chunk_bytes.len() as u32 > self.current_block.space_left() {
+                            panic!("chunk cannot fit in block")
+                        }
+                        self.current_block.add_chunk_bytes(chunk_bytes);
+                    }
+                    // let now_time = SystemTime::now();
+
+                    // println!(
+                    //     "time taken to complete add_term is  {:?}",
+                    //     now_time.duration_since(current_time)
+                    // );
+                    return Ok(());
+                }
+            };
+
             current_chunk.add_doc_id(current_posting.doc_id);
             current_chunk.add_doc_frequency(current_posting.positions.len() as u32);
             if current_posting.positions.len() > 0 && self.include_positions {
-                current_chunk.add_doc_positions(current_posting.positions.clone());
+                current_chunk.add_doc_positions(current_posting.positions);
             }
             current_chunk.no_of_postings += 1;
             i += 1;
@@ -207,10 +247,28 @@ impl MergedIndexBlockWriter {
     }
 
     fn write_block_to_index_file(&mut self) -> io::Result<()> {
+        // println!("started the write to buffer");
         let block_bytes = self.current_block.encode();
-        self.file_writer.write_all(&block_bytes)?;
-        self.file_writer.flush()?;
+        self.buffered_block_bytes.extend(block_bytes);
+        if self.buffered_block_bytes.len() >= 3_000_000 {
+            let current_time = SystemTime::now();
+            // println!("started the write to disk");
+            self.file_writer.write_all(&self.buffered_block_bytes)?;
+            self.flush()?;
+            self.buffered_block_bytes.clear();
+            let now_time = SystemTime::now();
+            println!(
+                "time taken to complete write to disk is  {:?}",
+                now_time.duration_since(current_time)
+            );
+        }
         self.current_block_no += 1;
+        Ok(())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        // println!("started the flush to disk");
+        self.file_writer.flush()?;
         Ok(())
     }
 }
@@ -468,7 +526,7 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
         let mut writer =
-            MergedIndexBlockWriter::new(file, None, Some(64), true, CompressionAlgorithm::Simple16);
+            MergedIndexBlockWriter::new(file, None, Some(64), true, CompressionAlgorithm::VarByte);
 
         let postings = vec![
             create_test_postings(u32::MAX - 1000, vec![1]),

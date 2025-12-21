@@ -86,7 +86,12 @@ pub(crate) fn vb_decode_posting_list(encoded_bytes: &[u8]) -> Vec<Posting> {
 pub(crate) fn vb_encode_posting_list(posting_list: &Vec<Posting>) -> Vec<u8> {
     let mut posting_list_bytes: Vec<u8> = Vec::<u8>::new();
     let mut last_doc_id = 0;
-    for posting in posting_list {
+    // posting_list.sort_by(|a, b| a.doc_id.cmp(&b.doc_id));
+    let mut indices: Vec<usize> = (0..posting_list.len()).collect();
+    indices.sort_unstable_by_key(|&i| posting_list[i].doc_id);
+
+    for &idx in &indices {
+        let posting = &posting_list[idx];
         if last_doc_id == 0 {
             let mut posting_bytes = vb_encode(&posting.doc_id);
             let mut position_bytes = vb_encode_positions(&posting.positions);

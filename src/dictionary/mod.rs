@@ -1,24 +1,26 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::utils::posting::Posting;
 #[derive(Debug, Clone)]
 pub struct Dictionary {
+    pub no_of_terms: u32,
     current_size: u32,
-    dictionary: HashMap<String, Vec<Posting>>,
+    pub dictionary: BTreeMap<String, Vec<Posting>>,
 }
 
 impl Dictionary {
     pub fn new() -> Dictionary {
         return Dictionary {
+            no_of_terms: 0,
             current_size: 0,
-            dictionary: HashMap::new(),
+            dictionary: BTreeMap::new(),
         };
     }
 
     // max size of dictionary in bytes
-    // we are keeping it as 1MB
+    // we are keeping it as 100 MB
     pub fn max_size(&self) -> u32 {
-        return 1000000;
+        return 200_000_000;
     }
     pub fn size(&self) -> u32 {
         self.current_size
@@ -26,6 +28,7 @@ impl Dictionary {
     pub fn clear(&mut self) {
         self.dictionary.clear();
         self.current_size = 0;
+        self.no_of_terms = 0;
     }
 
     pub fn does_term_already_exist(&mut self, term: &str) -> bool {
@@ -33,28 +36,25 @@ impl Dictionary {
     }
 
     pub fn add_term_posting(&mut self, term: &str, posting: Vec<Posting>) {
-        let posting_list = posting.clone();
-        self.dictionary.insert(String::from(term), posting);
-        for posting in posting_list {
+        for posting in &posting {
             let posting_length = posting.positions.len() as u32;
             self.current_size += 4 + 4 * posting_length;
         }
+        self.dictionary.insert(String::from(term), posting);
         self.current_size += 4;
         self.current_size += term.len() as u32;
     }
 
-    pub fn get_postings(&self, term: &str) -> Option<Vec<Posting>> {
-        if let Some(postings_list) = self.dictionary.get(term) {
-            return Some(postings_list.clone());
-        }
-        None
+    pub fn get_postings(&self, term: &str) -> Option<&Vec<Posting>> {
+        self.dictionary.get(term)
     }
 
     pub fn add_term(&mut self, term: &str) {
         if !self.does_term_already_exist(term) {
             self.dictionary.insert(String::from(term), Vec::new());
             self.current_size += 4;
-            self.current_size += term.len() as u32
+            self.current_size += term.len() as u32;
+            self.no_of_terms += 1;
         }
     }
 
@@ -67,12 +67,7 @@ impl Dictionary {
     }
 
     pub fn sort_terms(&self) -> Vec<String> {
-        let mut sorted_terms: Vec<String> = Vec::new();
-        for (term, _) in &self.dictionary {
-            sorted_terms.push(term.to_string());
-        }
-        sorted_terms.sort();
-        sorted_terms
+        self.dictionary.keys().cloned().collect()
     }
 }
 
@@ -113,12 +108,12 @@ mod dictionary_tests {
         assert!(dict.does_term_already_exist("rust"));
         let retrieved_postings = dict.get_postings("rust");
         assert!(retrieved_postings.is_some());
-        assert_eq!(retrieved_postings.unwrap(), postings);
+        assert_eq!(*retrieved_postings.unwrap(), postings);
     }
 
     #[test]
     fn test_get_postings_nonexistent_term() {
-        let dict = Dictionary::new();
+        let mut dict = Dictionary::new();
         let postings = dict.get_postings("nonexistent");
         assert!(postings.is_none());
     }
@@ -202,7 +197,7 @@ mod dictionary_tests {
         dict.add_term_posting("test", new_postings.clone());
 
         let retrieved = dict.get_postings("test").unwrap();
-        assert_eq!(retrieved, new_postings);
+        assert_eq!(*retrieved, new_postings);
         assert_ne!(retrieved.len(), 1); // Should not be the initial posting
     }
 
@@ -245,8 +240,8 @@ mod dictionary_tests {
         // Get multiple references to the same postings
         let postings1 = dict.get_postings("concurrent");
         let postings2 = dict.get_postings("concurrent");
-
-        assert!(postings1.is_some());
+        let p1 = postings1.is_some();
+        assert!(p1);
         assert!(postings2.is_some());
         assert_eq!(postings1.unwrap(), postings2.unwrap());
 

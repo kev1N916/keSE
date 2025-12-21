@@ -1,4 +1,4 @@
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Posting {
     pub doc_id: u32,
     pub positions: Vec<u32>,
@@ -7,6 +7,67 @@ impl Posting {
     pub fn new(doc_id: u32, positions: Vec<u32>) -> Self {
         Self { doc_id, positions }
     }
+}
+
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
+
+#[derive(Eq, PartialEq)]
+struct PostingWithSource {
+    posting: Posting,
+    list_idx: usize,
+    pos_in_list: usize,
+}
+
+impl Ord for PostingWithSource {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // Reverse for min-heap, compare by doc_id
+        other.posting.doc_id.cmp(&self.posting.doc_id)
+    }
+}
+
+impl PartialOrd for PostingWithSource {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+pub fn merge_all_postings(lists: &[Vec<Posting>]) -> Vec<Posting> {
+    let total_size: usize = lists.iter().map(|l| l.len()).sum();
+    let mut result = Vec::with_capacity(total_size);
+    let mut heap = BinaryHeap::new();
+
+    // Initialize heap with first element from each list
+    for (idx, list) in lists.iter().enumerate() {
+        if !list.is_empty() {
+            heap.push(PostingWithSource {
+                posting: list[0].clone(),
+                list_idx: idx,
+                pos_in_list: 0,
+            });
+        }
+    }
+
+    while let Some(PostingWithSource {
+        posting,
+        list_idx,
+        pos_in_list,
+    }) = heap.pop()
+    {
+        result.push(posting);
+
+        // Add next element from same list
+        let next_pos = pos_in_list + 1;
+        if next_pos < lists[list_idx].len() {
+            heap.push(PostingWithSource {
+                posting: lists[list_idx][next_pos].clone(),
+                list_idx,
+                pos_in_list: next_pos,
+            });
+        }
+    }
+
+    result
 }
 
 pub fn merge_postings(p1: &[Posting], p2: &[Posting]) -> Vec<Posting> {
