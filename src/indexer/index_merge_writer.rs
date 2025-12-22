@@ -139,8 +139,8 @@ impl MergedIndexBlockWriter {
             term_frequency: 0,
         });
     }
-    pub fn get_term_metadata(&self, term: u32) -> Option<&TermMetadata> {
-        self.term_metadata.get(&term)
+    pub fn get_term_metadata(&mut self, term: u32) -> Option<&mut TermMetadata> {
+        self.term_metadata.get_mut(&term).take()
     }
     pub fn add_term(&mut self, term: u32, postings: Vec<Posting>) -> io::Result<()> {
         // let current_time = SystemTime::now();
@@ -182,7 +182,7 @@ impl MergedIndexBlockWriter {
                 }
 
                 if i == postings_length {
-                    let now_time = SystemTime::now();
+                    // let now_time = SystemTime::now();
 
                     // println!(
                     //     "time taken to complete add_term is  {:?}",
@@ -342,13 +342,18 @@ mod tests {
         writer.add_term(2, postings2).unwrap();
         writer.finish().unwrap();
 
-        let metadata1 = writer.get_term_metadata(1).unwrap();
-        let metadata2 = writer.get_term_metadata(2).unwrap();
+        {
+            let metadata1 = writer.get_term_metadata(1).unwrap();
+            assert_eq!(metadata1.term_frequency, 1);
+            assert!(metadata1.block_ids.len() > 0);
+        } // metadata1 reference dropped here
 
-        assert_eq!(metadata1.term_frequency, 1);
-        assert_eq!(metadata2.term_frequency, 1);
-        assert!(metadata1.block_ids.len() > 0);
-        assert!(metadata2.block_ids.len() > 0);
+        // Check metadata2
+        {
+            let metadata2 = writer.get_term_metadata(2).unwrap();
+            assert_eq!(metadata2.term_frequency, 1);
+            assert!(metadata2.block_ids.len() > 0);
+        }
     }
 
     #[test]

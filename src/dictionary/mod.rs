@@ -20,7 +20,7 @@ impl Dictionary {
     // max size of dictionary in bytes
     // we are keeping it as 100 MB
     pub fn max_size(&self) -> u32 {
-        return 200_000_000;
+        return 100_000_000;
     }
     pub fn size(&self) -> u32 {
         self.current_size

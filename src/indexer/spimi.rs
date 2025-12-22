@@ -198,7 +198,9 @@ impl Spimi {
             let term_id = in_memory_index.get_term_id(&term);
             if term_id != 0 {
                 if let Some(term_metadata) = index_merge_writer.get_term_metadata(term_id) {
-                    in_memory_index.set_block_ids(&term, term_metadata.block_ids.clone());
+                    // in_memory_index.set_block_ids(&term, term_metadata.block_ids.clone());
+                    in_memory_index
+                        .set_block_ids(&term, std::mem::take(&mut term_metadata.block_ids));
                     in_memory_index.set_term_frequency(&term, term_metadata.term_frequency);
                 }
             }

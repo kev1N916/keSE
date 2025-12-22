@@ -215,6 +215,10 @@ impl Indexer {
                     let plain_text = extract_plaintext(&article.text);
                     let tokens = search_tokenizer.tokenize(&plain_text);
 
+                    if article.title.contains("Fell") {
+                        println!("{}", plain_text);
+                        println!("{:?}", tokens);
+                    }
                     local_lengths.push(tokens.len() as u32);
                     local_names.push(article.title);
                     local_urls.push(article.url);
@@ -324,6 +328,10 @@ impl Indexer {
                     let plain_text = extract_plaintext(&article.text);
                     let tokens = search_tokenizer.tokenize(&plain_text);
 
+                    // if article.title.contains("Fell") {
+                    //     println!("{}", plain_text);
+                    //     println!("{:?}", tokens);
+                    // }
                     local_lengths.push(tokens.len() as u32);
                     local_names.push(article.title);
                     local_urls.push(article.url);
@@ -466,12 +474,7 @@ impl Indexer {
         self.merge_spimi_files()
     }
     fn spimi(&mut self) -> io::Result<()> {
-        let mut spmi = Spimi::new(self.get_result_directory_path());
         let (tx, rx) = mpsc::channel::<Vec<Term>>();
-        // let doc_id = Arc::new(AtomicU32::new(0));
-        let handle = thread::spawn(move || {
-            spmi.single_pass_in_memory_indexing(rx).unwrap();
-        });
 
         let files: Vec<_> = std::fs::read_dir(self.get_index_directory_path())
             .unwrap()
@@ -487,6 +490,11 @@ impl Indexer {
         let doc_names = Arc::new(Mutex::new(Vec::with_capacity(estimated_docs)));
         let doc_urls = Arc::new(Mutex::new(Vec::with_capacity(estimated_docs)));
         // let article_metadata = Arc::new(Mutex::new(ArticleMetadata::new()));
+
+        let mut spmi = Spimi::new(self.get_result_directory_path());
+        let handle = thread::spawn(move || {
+            spmi.single_pass_in_memory_indexing(rx).unwrap();
+        });
 
         let num_threads = 2;
         let chunk_size = (files.len() + num_threads - 1) / num_threads;
@@ -618,7 +626,7 @@ mod tests {
             Path::new("enwiki-20171001-pages-meta-current-withlinks-processed");
         println!("{}", index_directory_path.to_str().unwrap().to_string());
         indexer.set_index_directory_path(index_directory_path.to_str().unwrap().to_string());
-        indexer.spimi().unwrap();
+        indexer.index().unwrap();
     }
 
     #[test]

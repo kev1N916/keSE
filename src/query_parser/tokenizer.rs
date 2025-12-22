@@ -19,6 +19,8 @@ impl From<std::io::Error> for TokenizationError {
         TokenizationError::LemmatizerError(error)
     }
 }
+
+#[derive(Debug)]
 pub struct Token {
     pub position: u32,
     pub word: String,
@@ -44,7 +46,7 @@ const STOP_WORDS: &[&str] = &[
 
 #[derive(Debug, Clone)]
 pub struct SearchTokenizer {
-    lemmatizer: Lemmatizer,
+    // lemmatizer: Lemmatizer,
     stop_word_set: HashSet<String>,
 }
 
@@ -95,8 +97,9 @@ pub fn clean_word(word: &str) -> String {
     trimmed.to_lowercase()
 }
 
-pub fn is_pure_alphabets_with_hyphen(text: &str) -> bool {
-    !text.is_empty() && text.chars().all(|c| c.is_ascii_alphabetic() || c == '-')
+pub fn is_valid_token(text: &str) -> bool {
+    // Changed .is_ascii_alphabetic() to .is_ascii_alphanumeric()
+    !text.is_empty() && text.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
 pub struct TokenizeQueryResult {
@@ -109,16 +112,19 @@ impl SearchTokenizer {
         let path_as_string = format!("{}", current_dir.display());
         let mut path = path_as_string.to_string();
         path += "/src";
-        let lemmatizer_path = path.clone() + "/lemmas.txt";
+        // let lemmatizer_path = path.clone() + "/lemmas.txt";
 
-        let lemmas = parse_lemma(&lemmatizer_path)?;
-        let lemmatizer = Lemmatizer { lemmas };
+        // let lemmas = parse_lemma(&lemmatizer_path)?;
+        // // println!("size of lemma map {}", lemmas.len());
+        // let lemmatizer = Lemmatizer {
+        //     lemmas: HashMap::new(),
+        // };
 
         // Initialize stop word set
         let stop_word_set: HashSet<String> = STOP_WORDS.iter().map(|&s| s.to_string()).collect();
 
         Ok(SearchTokenizer {
-            lemmatizer,
+            // lemmatizer,
             stop_word_set,
         })
     }
@@ -139,18 +145,20 @@ impl SearchTokenizer {
 
             if !cleaned_word.is_empty()
                 && !self.stop_word_set.contains(&cleaned_word)
-                && is_pure_alphabets_with_hyphen(&cleaned_word)
+                && is_valid_token(&cleaned_word)
             {
                 // Get lemma or use cleaned_word, avoid cloning in the match
-                let token_word = self
-                    .lemmatizer
-                    .lemmatize(&cleaned_word)
-                    .unwrap_or(&cleaned_word); // Only clone once here
-
+                // if let Some(token_word) = self.lemmatizer.lemmatize(&cleaned_word) {
+                //     unigram_tokens.push(Token {
+                //         position,
+                //         word: token_word.to_string(),
+                //     });
+                // } else {
                 unigram_tokens.push(Token {
                     position,
-                    word: token_word.to_string(),
+                    word: cleaned_word,
                 });
+                // }
             }
 
             position += 1;
@@ -174,17 +182,20 @@ impl SearchTokenizer {
 
             if !cleaned_word.is_empty()
                 && !self.stop_word_set.contains(&cleaned_word)
-                && is_pure_alphabets_with_hyphen(&cleaned_word)
+                && is_valid_token(&cleaned_word)
             {
-                let token_word = self
-                    .lemmatizer
-                    .lemmatize(&cleaned_word)
-                    .unwrap_or(&cleaned_word);
-
+                // Get lemma or use cleaned_word, avoid cloning in the match
+                // if let Some(token_word) = self.lemmatizer.lemmatize(&cleaned_word) {
+                //     tokens.push(Token {
+                //         position,
+                //         word: token_word.to_string(),
+                //     });
+                // } else {
                 tokens.push(Token {
                     position,
-                    word: token_word.to_string(),
+                    word: cleaned_word,
                 });
+                // }
             }
 
             position += 1;

@@ -1,6 +1,5 @@
 use crate::compressor::compressor::{CompressionAlgorithm, Compressor};
 const POSITIONS_DELIMITER: u8 = 0x00;
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct Chunk {
     pub size_of_chunk: u32,                  // stored on disk
@@ -49,9 +48,11 @@ impl Chunk {
 
     pub fn get_doc_ids(&self) -> Vec<u32> {
         if self.compressed_doc_ids.len() > 0 {
-            return self
+            let mut doc_ids = self
                 .compressor
-                .decompress_list_with_difference(&self.compressed_doc_ids);
+                .decompress_list_with_dgaps(&self.compressed_doc_ids);
+            doc_ids.truncate(self.no_of_postings as usize);
+            return doc_ids;
         }
         self.doc_ids.clone()
     }
@@ -62,18 +63,22 @@ impl Chunk {
 
     pub fn get_doc_frequencies(&self) -> Vec<u32> {
         if self.compressed_doc_frequencies.len() > 0 {
-            return self
+            let mut doc_freq = self
                 .compressor
                 .decompress_list(&self.compressed_doc_frequencies);
+            doc_freq.truncate(self.no_of_postings as usize);
+            return doc_freq;
         }
         self.doc_frequencies.clone()
     }
 
     pub fn get_posting_list(&self, index: usize) -> Vec<u32> {
         if self.indexed_compressed_positions.len() > 0 {
-            return self
+            let mut positions = self
                 .compressor
-                .decompress_list_with_difference(&self.indexed_compressed_positions[index]);
+                .decompress_list_with_dgaps(&self.indexed_compressed_positions[index]);
+            positions.truncate(self.doc_frequencies[index] as usize);
+            return positions;
         }
         Vec::new()
     }
@@ -82,7 +87,8 @@ impl Chunk {
         if self.compressed_doc_ids.len() > 0 {
             self.doc_ids = self
                 .compressor
-                .decompress_list_with_difference(&self.compressed_doc_ids);
+                .decompress_list_with_dgaps(&self.compressed_doc_ids);
+            self.doc_ids.truncate(self.no_of_postings as usize);
             self.compressed_doc_ids.clear();
         }
     }
@@ -92,6 +98,7 @@ impl Chunk {
             self.doc_frequencies = self
                 .compressor
                 .decompress_list(&self.compressed_doc_frequencies);
+            self.doc_frequencies.truncate(self.no_of_postings as usize);
             self.compressed_doc_frequencies.clear();
         }
     }
@@ -100,21 +107,21 @@ impl Chunk {
         if self.compressed_doc_positions.len() == 0 {
             return;
         }
-        let mut posting_list: &[u8] = &[];
-        let mut i = 0;
+        let mut offset = 0;
         let mut indexed_compressed_positions = Vec::new();
-        while i < self.compressed_doc_positions.len() {
-            let mut j = i;
-            while j < self.compressed_doc_positions.len() && self.compressed_doc_positions[j] != 0 {
-                j += 1;
-            }
-            if j == i {
-                break;
-            }
-            posting_list = &self.compressed_doc_positions[i as usize..j as usize];
-            i = j + 1;
-            indexed_compressed_positions.push(posting_list.to_vec());
+        for _ in 0..self.no_of_postings {
+            let positions_length = u16::from_le_bytes(
+                self.compressed_doc_positions[offset..offset + 2]
+                    .try_into()
+                    .unwrap(),
+            ) as usize;
+            offset += 2;
+            println!("{}", positions_length);
+            indexed_compressed_positions
+                .push(self.compressed_doc_positions[offset..offset + positions_length].to_vec());
+            offset += positions_length;
         }
+        self.compressed_doc_positions.clear();
         self.indexed_compressed_positions = indexed_compressed_positions;
     }
 
@@ -132,19 +139,21 @@ impl Chunk {
     }
 
     pub fn encode(&mut self) -> Vec<u8> {
-        let mut chunk_bytes: Vec<u8> = Vec::new();
-        chunk_bytes.extend_from_slice(&self.size_of_chunk.to_le_bytes());
+        let mut chunk_bytes: Vec<u8> = Vec::with_capacity(1000);
+        chunk_bytes.extend_from_slice(&[0u8; 4]);
         chunk_bytes.extend_from_slice(&self.no_of_postings.to_le_bytes());
         chunk_bytes.extend_from_slice(&self.max_doc_id.to_le_bytes());
-        chunk_bytes.extend(&self.compressor.compress_list_with_difference(&self.doc_ids));
-        chunk_bytes.push(POSITIONS_DELIMITER);
-        chunk_bytes.extend(&self.compressor.compress_list(&self.doc_frequencies));
-        chunk_bytes.push(POSITIONS_DELIMITER);
-
-        if self.doc_positions.len() > 0 {
+        let doc_id_bytes = self.compressor.compress_list_with_d_gaps(&self.doc_ids);
+        chunk_bytes.extend_from_slice(&(doc_id_bytes.len() as u16).to_le_bytes());
+        chunk_bytes.extend(doc_id_bytes);
+        let doc_freq_bytes = self.compressor.compress_list(&self.doc_frequencies);
+        chunk_bytes.extend_from_slice(&(doc_freq_bytes.len() as u16).to_le_bytes());
+        chunk_bytes.extend(doc_freq_bytes);
+        if !self.doc_positions.is_empty() {
             for position in &self.doc_positions {
-                chunk_bytes.extend(self.compressor.compress_list_with_difference(position));
-                chunk_bytes.push(POSITIONS_DELIMITER);
+                let position_bytes = self.compressor.compress_list_with_d_gaps(position);
+                chunk_bytes.extend_from_slice(&(position_bytes.len() as u16).to_le_bytes());
+                chunk_bytes.extend(position_bytes);
             }
         }
         self.size_of_chunk = (chunk_bytes.len() - 4) as u32;
@@ -163,24 +172,18 @@ impl Chunk {
         offset += 1;
         self.max_doc_id = u32::from_le_bytes(chunk_bytes[offset..offset + 4].try_into().unwrap());
         offset += 4;
-        let mut doc_id_index = offset;
-        while doc_id_index < chunk_bytes.len() {
-            if chunk_bytes[doc_id_index] == 0 {
-                break;
-            }
-            doc_id_index += 1;
-        }
-        self.compressed_doc_ids = chunk_bytes[offset..doc_id_index].to_vec();
-        offset = doc_id_index + 1;
-        let mut doc_frequncy_index = offset;
-        while doc_frequncy_index < chunk_bytes.len() {
-            if chunk_bytes[doc_frequncy_index] == 0 {
-                break;
-            }
-            doc_frequncy_index += 1;
-        }
-        self.compressed_doc_frequencies = chunk_bytes[offset..doc_frequncy_index].to_vec();
-        self.compressed_doc_positions = chunk_bytes[doc_frequncy_index + 1..].to_vec();
+        let doc_id_bytes_length =
+            u16::from_le_bytes(chunk_bytes[offset..offset + 2].try_into().unwrap()) as usize;
+        offset += 2;
+        self.compressed_doc_ids = chunk_bytes[offset..offset + doc_id_bytes_length].to_vec();
+        offset += doc_id_bytes_length;
+        let doc_freq_bytes_length =
+            u16::from_le_bytes(chunk_bytes[offset..offset + 2].try_into().unwrap()) as usize;
+        offset += 2;
+        self.compressed_doc_frequencies =
+            chunk_bytes[offset..offset + doc_freq_bytes_length].to_vec();
+        offset += doc_freq_bytes_length;
+        self.compressed_doc_positions = chunk_bytes[offset..].to_vec();
         self.index_positions();
     }
 
@@ -245,7 +248,7 @@ mod tests {
 
     #[test]
     fn test_encode_decode_multiple_documents() {
-        let mut chunk = Chunk::new(1, CompressionAlgorithm::VarByte);
+        let mut chunk = Chunk::new(1, CompressionAlgorithm::Simple16);
 
         chunk.add_doc_id(100);
         chunk.add_doc_id(200);
@@ -264,13 +267,15 @@ mod tests {
 
         let encoded = chunk.encode();
 
-        let mut decoded_chunk = Chunk::new(1, CompressionAlgorithm::VarByte);
+        let mut decoded_chunk = Chunk::new(1, CompressionAlgorithm::Simple16);
         decoded_chunk.decode(&encoded[4..]);
 
         assert_eq!(decoded_chunk.no_of_postings, 3);
         assert_eq!(decoded_chunk.max_doc_id, 300);
-        assert_eq!(decoded_chunk.get_doc_ids(), vec![100, 200, 300]);
-        assert_eq!(decoded_chunk.get_doc_frequencies(), vec![3, 2, 4]);
+        decoded_chunk.decode_doc_frequencies();
+        decoded_chunk.decode_doc_ids();
+        assert_eq!(decoded_chunk.doc_ids, vec![100, 200, 300]);
+        assert_eq!(decoded_chunk.doc_frequencies, vec![3, 2, 4]);
         assert_eq!(decoded_chunk.get_posting_list(0), vec![1, 5, 10]);
         assert_eq!(decoded_chunk.get_posting_list(1), vec![20, 25]);
         assert_eq!(decoded_chunk.get_posting_list(2), vec![30, 35, 40, 45]);
@@ -278,7 +283,7 @@ mod tests {
 
     #[test]
     fn test_encode_decode_no_positions() {
-        let mut chunk = Chunk::new(1, CompressionAlgorithm::VarByte);
+        let mut chunk = Chunk::new(1, CompressionAlgorithm::Simple9);
 
         chunk.add_doc_id(100);
         chunk.add_doc_id(200);
@@ -289,7 +294,7 @@ mod tests {
 
         let encoded = chunk.encode();
 
-        let mut decoded_chunk = Chunk::new(1, CompressionAlgorithm::VarByte);
+        let mut decoded_chunk = Chunk::new(1, CompressionAlgorithm::Simple9);
         decoded_chunk.decode(&encoded[4..]);
 
         assert_eq!(decoded_chunk.no_of_postings, 2);

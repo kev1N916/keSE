@@ -399,7 +399,7 @@ mod merged_index_block_writer_tests {
     fn test_get_term_metadata_nonexistent() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let writer =
+        let mut writer =
             MergedIndexBlockWriter::new(file, Some(64), None, true, CompressionAlgorithm::VarByte);
 
         let result = writer.get_term_metadata(999);
