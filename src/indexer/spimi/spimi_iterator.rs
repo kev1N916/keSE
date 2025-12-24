@@ -1,12 +1,13 @@
 use std::{
-    fs::File,
+    fs::{self, File},
     io::{self, BufReader, ErrorKind, Read, Seek},
-    time::SystemTime,
 };
 
 use crate::{indexer::helper::vb_decode_posting_list, utils::posting::Posting};
 
-pub struct IndexMergeIterator {
+const BUFFER_SIZE: u32 = 3_000_000;
+
+pub struct SpimiIterator {
     no_of_terms: u32,
     file_reader: BufReader<File>,
     current_term_no: u32,
@@ -19,9 +20,10 @@ pub struct IndexMergeIterator {
     read_buffer: Vec<u8>,
 }
 
-impl IndexMergeIterator {
-    pub fn new(file_reader: BufReader<File>) -> IndexMergeIterator {
-        IndexMergeIterator {
+// The struct which is used to iterate over the temporary index files
+impl SpimiIterator {
+    pub fn new(file_reader: BufReader<File>) -> SpimiIterator {
+        SpimiIterator {
             file_reader,
             no_of_terms: 0,
             current_term_no: 0,
@@ -38,7 +40,34 @@ impl IndexMergeIterator {
     pub fn get_current_term(&mut self) -> u32 {
         self.current_term_no
     }
+    // Goes over all the entries in the directory and opens iterators to them
+    pub fn scan_and_create_iterators(directory: &str) -> io::Result<Vec<SpimiIterator>> {
+        let mut iterators = Vec::with_capacity(50);
 
+        // Read directory entries
+        for entry in fs::read_dir(directory)? {
+            let entry = entry?;
+            let path = entry.path();
+
+            // Check for .tmpidx files
+            if path.is_file() {
+                if let Some(ext) = path.extension() {
+                    if ext == "tmpidx" {
+                        let file = File::open(&path)?;
+                        let file_reader = BufReader::new(file);
+                        let mut merge_iter = SpimiIterator::new(file_reader);
+                        merge_iter.init()?; // Initialize the iterator
+                        iterators.push(merge_iter);
+                        println!("Created iterator for: {}", path.display());
+                    }
+                }
+            }
+        }
+
+        Ok(iterators)
+    }
+
+    // Initializes the no of terms and the current offset in the file
     pub fn init(&mut self) -> io::Result<()> {
         self.file_reader.seek(std::io::SeekFrom::Start(0))?;
         let mut buf = [0u8; 4];
@@ -54,6 +83,8 @@ impl IndexMergeIterator {
         Ok(())
     }
 
+    // Takes in posting lists from the temporary index file until the
+    // in memory buffer is full
     fn advance(&mut self) -> io::Result<()> {
         let previous_offset = self.current_offset;
 
@@ -61,8 +92,7 @@ impl IndexMergeIterator {
         self.buffered_postings.clear();
         self.buffered_terms.clear();
 
-        const BUFFER_SIZE: u32 = 3_000_000;
-
+        // Reads in terms and postings until the buffer is full
         while (self.current_offset - previous_offset) < BUFFER_SIZE {
             let mut buf = [0u8; 4];
 
@@ -109,22 +139,26 @@ impl IndexMergeIterator {
     }
 
     pub fn next(&mut self) -> io::Result<bool> {
+        // Condition for which the iterator is exhausted
         if self.current_term_no >= self.no_of_terms {
             self.current_term = None;
             self.current_postings = None;
             return Ok(false);
         }
 
+        // Fill up the buffered terms and postings
         if self.current_buffer_index == self.buffered_terms.len() {
             self.advance().unwrap();
             self.current_buffer_index = 0;
         }
+        // move the data out from the buffered_terms vector instead of cloning it
         self.current_term = Some(std::mem::take(
             &mut self.buffered_terms[self.current_buffer_index],
         ));
         self.current_postings = Some(vb_decode_posting_list(
             &self.buffered_postings[self.current_buffer_index],
         ));
+        // Advance the term_no and the buffer index
         self.current_term_no += 1;
         self.current_buffer_index += 1;
         Ok(true)
@@ -176,7 +210,7 @@ mod tests {
         let temp_file = create_test_index_file(vec![("apple", postings.clone())]);
         let file = temp_file.reopen().unwrap();
         let file_reader = BufReader::new(file);
-        let mut iterator = IndexMergeIterator::new(file_reader);
+        let mut iterator = SpimiIterator::new(file_reader);
 
         iterator.init().unwrap();
 
@@ -209,7 +243,7 @@ mod tests {
 
         let file = temp_file.reopen().unwrap();
         let file_reader = BufReader::new(file);
-        let mut iterator = IndexMergeIterator::new(file_reader);
+        let mut iterator = SpimiIterator::new(file_reader);
 
         iterator.init().unwrap();
 
@@ -238,7 +272,7 @@ mod tests {
         let temp_file = create_test_index_file(vec![]);
         let file = temp_file.reopen().unwrap();
         let file_reader = BufReader::new(file);
-        let mut iterator = IndexMergeIterator::new(file_reader);
+        let mut iterator = SpimiIterator::new(file_reader);
 
         iterator.init().unwrap();
 
@@ -254,7 +288,7 @@ mod tests {
         let temp_file = create_test_index_file(vec![("empty", postings)]);
         let file = temp_file.reopen().unwrap();
         let file_reader = BufReader::new(file);
-        let mut iterator = IndexMergeIterator::new(file_reader);
+        let mut iterator = SpimiIterator::new(file_reader);
 
         iterator.init().unwrap();
 
@@ -286,7 +320,7 @@ mod tests {
         let temp_file = create_test_index_file(vec![("test", postings.clone())]);
         let file = temp_file.reopen().unwrap();
         let file_reader = BufReader::new(file);
-        let mut iterator = IndexMergeIterator::new(file_reader);
+        let mut iterator = SpimiIterator::new(file_reader);
 
         iterator.init().unwrap();
 
@@ -309,7 +343,7 @@ mod tests {
         let temp_file = create_test_index_file(vec![("café", postings)]);
         let file = temp_file.reopen().unwrap();
         let file_reader = BufReader::new(file);
-        let mut iterator = IndexMergeIterator::new(file_reader);
+        let mut iterator = SpimiIterator::new(file_reader);
 
         iterator.init().unwrap();
 
@@ -327,7 +361,7 @@ mod tests {
         let temp_file = create_test_index_file(vec![(&long_term, postings)]);
         let file = temp_file.reopen().unwrap();
         let file_reader = BufReader::new(file);
-        let mut iterator = IndexMergeIterator::new(file_reader);
+        let mut iterator = SpimiIterator::new(file_reader);
 
         iterator.init().unwrap();
 
@@ -344,7 +378,7 @@ mod tests {
         let temp_file = create_test_index_file(vec![("single", postings)]);
         let file = temp_file.reopen().unwrap();
         let file_reader = BufReader::new(file);
-        let mut iterator = IndexMergeIterator::new(file_reader);
+        let mut iterator = SpimiIterator::new(file_reader);
 
         iterator.init().unwrap();
 
@@ -368,7 +402,7 @@ mod tests {
         let temp_file = create_test_index_file(vec![("frequent", postings.clone())]);
         let file = temp_file.reopen().unwrap();
         let file_reader = BufReader::new(file);
-        let mut iterator = IndexMergeIterator::new(file_reader);
+        let mut iterator = SpimiIterator::new(file_reader);
 
         iterator.init().unwrap();
 
@@ -391,7 +425,7 @@ mod tests {
         let temp_file = create_test_index_file(vec![("rare", postings)]);
         let file = temp_file.reopen().unwrap();
         let file_reader = BufReader::new(file);
-        let mut iterator = IndexMergeIterator::new(file_reader);
+        let mut iterator = SpimiIterator::new(file_reader);
 
         iterator.init().unwrap();
 

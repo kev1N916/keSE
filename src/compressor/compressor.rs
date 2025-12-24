@@ -37,7 +37,6 @@ impl Compressor {
     }
 
     fn reconstruct_list_from_d_gap_encoding(list_with_gaps: Vec<u32>) -> Vec<u32> {
-        println!("{:?}", list_with_gaps);
         let mut list_without_gaps = Vec::with_capacity(128);
 
         let mut last_member = 0;

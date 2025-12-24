@@ -47,7 +47,7 @@ impl QueryProcessor {
         let mut doc_ids = HashSet::new();
         for i in 0..block_ids.len() {
             let mut block = Block::new(block_ids[i], None);
-            block.init(&mut reader).unwrap();
+            block.decode(&mut reader).unwrap();
             let term_index = block.check_if_term_exists(term_id);
             let chunks = block.decode_chunks_for_term(
                 term_id,
@@ -65,7 +65,7 @@ impl QueryProcessor {
         let mut reader: BufReader<&mut File> = BufReader::new(&mut self.inverted_index_file);
         for i in 0..block_ids.len() {
             let mut block = Block::new(block_ids[i], None);
-            block.init(&mut reader).unwrap();
+            block.decode(&mut reader).unwrap();
             let term_index = block.check_if_term_exists(term_id);
             if term_index == -1 {
                 continue;
@@ -113,7 +113,7 @@ impl QueryProcessor {
                     ));
                 } else {
                     let mut new_block = Block::new(*block_id, None);
-                    new_block.init(&mut reader).unwrap();
+                    new_block.decode(&mut reader).unwrap();
                     let term_index = new_block.check_if_term_exists(query_metadata[i].term_id);
 
                     if term_index == -1 {

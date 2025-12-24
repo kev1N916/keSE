@@ -1,5 +1,5 @@
 use crate::compressor::compressor::{CompressionAlgorithm, Compressor};
-const POSITIONS_DELIMITER: u8 = 0x00;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Chunk {
     pub size_of_chunk: u32,                  // stored on disk
@@ -116,7 +116,6 @@ impl Chunk {
                     .unwrap(),
             ) as usize;
             offset += 2;
-            println!("{}", positions_length);
             indexed_compressed_positions
                 .push(self.compressed_doc_positions[offset..offset + positions_length].to_vec());
             offset += positions_length;
@@ -238,7 +237,7 @@ mod tests {
 
         let mut decoded_chunk = Chunk::new(1, CompressionAlgorithm::VarByte);
         decoded_chunk.decode(&encoded[4..]);
-
+        decoded_chunk.decode_doc_frequencies();
         assert_eq!(decoded_chunk.no_of_postings, 1);
         assert_eq!(decoded_chunk.max_doc_id, 100);
         assert_eq!(decoded_chunk.get_doc_ids(), vec![100]);
@@ -321,6 +320,7 @@ mod tests {
 
         let mut decoded_chunk = Chunk::new(1, CompressionAlgorithm::VarByte);
         decoded_chunk.decode(&encoded[4..]);
+        decoded_chunk.decode_doc_frequencies();
 
         assert_eq!(decoded_chunk.get_doc_ids(), vec![1000000, 2000000]);
         assert_eq!(decoded_chunk.get_doc_frequencies(), vec![100, 200]);
@@ -387,6 +387,7 @@ mod tests {
 
         let mut decoded = Chunk::new(1, CompressionAlgorithm::VarByte);
         decoded.decode(&encoded[4..]);
+        decoded.decode_doc_frequencies();
 
         // Verify all data matches
         assert_eq!(decoded.no_of_postings, original.no_of_postings);

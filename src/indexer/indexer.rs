@@ -1,20 +1,16 @@
 use crate::{
     compressor::compressor::CompressionAlgorithm,
     in_memory_index::in_memory_index::InMemoryIndex,
-    indexer::spimi::Spimi,
+    indexer::spimi::spimi::Spimi,
     query_parser::tokenizer::SearchTokenizer,
     utils::{posting::Posting, term::Term},
 };
 
-use bzip2::read::BzDecoder;
-use core::time;
 use once_cell::sync::Lazy;
-use pdf_oxide::PdfDocument;
 use regex::Regex;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
     fs::File,
     io::{self, BufReader},
     path::Path,
@@ -26,7 +22,7 @@ use std::{
     thread,
     time::SystemTime,
 };
-use zstd::stream::read::Decoder; // Using the streaming decoder
+use zstd::stream::read::Decoder;
 
 // Define the structure matching your JSON format
 #[derive(Debug, Deserialize, Serialize)]
@@ -51,7 +47,6 @@ pub struct Indexer {
     document_names: Vec<String>,
     document_urls: Vec<String>,
     pub document_lengths: Vec<u32>,
-    // article_metadata: ArticleMetadata,
     index_directory_path: String,
     search_tokenizer: SearchTokenizer,
     compression_algorithm: CompressionAlgorithm,
@@ -59,35 +54,6 @@ pub struct Indexer {
 }
 
 static TAG_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"<[^>]*>").unwrap());
-
-// fn extract_plaintext(text: &[Vec<String>]) -> String {
-//     let total_len: usize = text
-//         .iter()
-//         .map(|para| para.iter().map(|s| s.len()).sum::<usize>())
-//         .sum();
-//     let mut result = String::with_capacity(total_len + text.len() * 2);
-
-//     for (i, paragraph) in text.iter().enumerate() {
-//         if i > 0 {
-//             result.push_str("\n\n");
-//         }
-//         for sentence in paragraph {
-//             // Remove tags inline
-//             let mut chars = sentence.chars();
-//             let mut in_tag = false;
-//             while let Some(ch) = chars.next() {
-//                 if ch == '<' {
-//                     in_tag = true;
-//                 } else if ch == '>' {
-//                     in_tag = false;
-//                 } else if !in_tag {
-//                     result.push(ch);
-//                 }
-//             }
-//         }
-//     }
-//     result
-// }
 
 fn extract_plaintext(text: &[Vec<String>]) -> String {
     // Pre-calculate capacity to avoid reallocations
@@ -107,59 +73,6 @@ fn extract_plaintext(text: &[Vec<String>]) -> String {
     TAG_REGEX.replace_all(&result, "").into_owned()
 }
 
-// fn extract_plaintext(text: &[Vec<String>]) -> String {
-//     let total_len: usize = text
-//         .iter()
-//         .flat_map(|para| para.iter())
-//         .map(|s| s.len())
-//         .sum();
-
-//     let mut result = String::with_capacity(total_len + text.len() * 2);
-
-//     for (i, paragraph) in text.iter().enumerate() {
-//         if i > 0 {
-//             result.push_str("\n\n");
-//         }
-//         for sentence in paragraph {
-//             // Use bytes for faster processing
-//             let bytes = sentence.as_bytes();
-//             let mut i = 0;
-//             while i < bytes.len() {
-//                 if bytes[i] == b'<' {
-//                     // Skip until '>'
-//                     while i < bytes.len() && bytes[i] != b'>' {
-//                         i += 1;
-//                     }
-//                     i += 1; // skip '>'
-//                 } else {
-//                     // Find next '<' or end
-//                     let start = i;
-//                     while i < bytes.len() && bytes[i] != b'<' {
-//                         i += 1;
-//                     }
-//                     result.push_str(unsafe { std::str::from_utf8_unchecked(&bytes[start..i]) });
-//                 }
-//             }
-//         }
-//     }
-//     result
-// }
-// #[derive(Debug)]
-// pub struct ArticleMetadata {
-//     pub doc_length: Vec<u32>,
-//     pub doc_names: Vec<String>,
-//     pub doc_urls: Vec<String>,
-// }
-
-// impl ArticleMetadata {
-//     pub fn new() -> Self {
-//         Self {
-//             doc_length: Vec::with_capacity(6_000_000),
-//             doc_names: Vec::with_capacity(6_000_000),
-//             doc_urls: Vec::with_capacity(6_000_000),
-//         }
-//     }
-// }
 impl Indexer {
     pub fn new(
         search_tokenizer: SearchTokenizer,
@@ -173,7 +86,6 @@ impl Indexer {
             document_lengths: Vec::new(),
             document_names: Vec::new(),
             document_urls: Vec::new(),
-            // article_metadata: ArticleMetadata::new(),
             index_directory_path: String::new(),
             search_tokenizer,
             compression_algorithm,
@@ -184,143 +96,30 @@ impl Indexer {
     pub fn get_no_of_docs(&self) -> u32 {
         self.doc_id
     }
-    fn read_bz2_file(
-        path: &Path,
-        tx: &mpsc::Sender<Vec<Term>>,
-        doc_id: &Arc<AtomicU32>,
-        doc_lengths: &Arc<Mutex<Vec<u32>>>,
-        doc_urls: &Arc<Mutex<Vec<String>>>,
-        doc_names: &Arc<Mutex<Vec<String>>>,
-        // article_metadata: &Arc<Mutex<ArticleMetadata>>,
-        search_tokenizer: &SearchTokenizer,
-    ) -> io::Result<()> {
-        let current_time = SystemTime::now();
-        let file = File::open(path)?;
-        let decoder = BzDecoder::new(file);
-        let reader = BufReader::new(decoder);
-        let stream = serde_json::Deserializer::from_reader(reader).into_iter::<WikiArticle>();
-
-        let mut terms = Vec::with_capacity(400);
-
-        // Accumulate all data from this file locally
-        let mut local_lengths = Vec::with_capacity(400);
-        let mut local_names = Vec::with_capacity(400);
-        let mut local_urls = Vec::with_capacity(400);
-        let mut local_doc_index = 0u32; // Track local doc index for this file
-        let mut doc_postings: FxHashMap<String, Vec<u32>> =
-            FxHashMap::with_capacity_and_hasher(400, Default::default());
-        for result in stream {
-            match result {
-                Ok(article) => {
-                    let plain_text = extract_plaintext(&article.text);
-                    let tokens = search_tokenizer.tokenize(&plain_text);
-
-                    if article.title.contains("Fell") {
-                        println!("{}", plain_text);
-                        println!("{:?}", tokens);
-                    }
-                    local_lengths.push(tokens.len() as u32);
-                    local_names.push(article.title);
-                    local_urls.push(article.url);
-
-                    doc_postings.clear();
-                    // let mut doc_postings: FxHashMap<String, Vec<u32>> =
-                    //     FxHashMap::with_capacity_and_hasher(400, Default::default());
-
-                    for token in &tokens {
-                        doc_postings
-                            .entry(token.word.clone())
-                            .or_insert_with(Vec::new)
-                            .push(token.position);
-                    }
-
-                    // Drain to avoid another clone
-                    for (key, value) in doc_postings.drain() {
-                        let term = Term {
-                            posting: Posting {
-                                doc_id: local_doc_index,
-                                positions: value,
-                            },
-                            term: key,
-                        };
-                        terms.push(term);
-                    }
-
-                    local_doc_index += 1;
-                }
-                Err(e) => {
-                    eprintln!("Error parsing: {}", e);
-                }
-            }
-        }
-
-        // Now acquire locks ONCE and push everything
-        let start_doc_id = {
-            let mut lengths = doc_lengths.lock().unwrap();
-            let mut names = doc_names.lock().unwrap();
-            let mut urls = doc_urls.lock().unwrap();
-
-            // Reserve doc_id range atomically
-            let start_id = doc_id.fetch_add(local_lengths.len() as u32, Ordering::SeqCst);
-
-            // let mut article_metadata = article_metadata.lock().unwrap();
-            // Push all data at once
-
-            // for i in start_id..start_id + local_lengths.len() as u32 {
-
-            // }
-            // article_metadata.doc_length.extend(local_lengths);
-            // article_metadata.doc_names.extend(local_names);
-            // article_metadata.doc_urls.extend(local_urls);
-
-            lengths.extend(local_lengths);
-            names.extend(local_names);
-            urls.extend(local_urls);
-
-            start_id
-        }; // Locks released here
-
-        // println!("current doc_id {}", start_doc_id);
-        // Now fix all the doc_ids in terms
-        for term in &mut terms {
-            term.posting.doc_id = start_doc_id + term.posting.doc_id + 1; // +1 if 1-indexed
-        }
-
-        tx.send(terms).unwrap();
-        let now_time = SystemTime::now();
-        println!("time taken {:?}", now_time.duration_since(current_time));
-        Ok(())
-    }
 
     fn read_zstd_file(
         path: &Path,
-        tx: &mpsc::Sender<Vec<Term>>,
+        tx: &mpsc::SyncSender<Vec<Term>>,
         doc_id: &Arc<AtomicU32>,
         doc_lengths: &Arc<Mutex<Vec<u32>>>,
         doc_urls: &Arc<Mutex<Vec<String>>>,
         doc_names: &Arc<Mutex<Vec<String>>>,
-        // article_metadata: &Arc<Mutex<ArticleMetadata>>,
         search_tokenizer: &SearchTokenizer,
     ) -> io::Result<()> {
-        // let current_time = SystemTime::now();
         let file = File::open(path)?;
         let decoder = Decoder::new(file)?;
         let reader = BufReader::new(decoder);
 
         let stream = serde_json::Deserializer::from_reader(reader).into_iter::<WikiArticle>();
-        let mut terms = Vec::with_capacity(400);
+        let mut terms = Vec::with_capacity(50000);
 
-        // Accumulate all data from this file locally
         let mut local_lengths = Vec::with_capacity(400);
         let mut local_names = Vec::with_capacity(400);
         let mut local_urls = Vec::with_capacity(400);
         let mut local_doc_index = 0u32; // Track local doc index for this file
-        // let mut doc_postings: FxHashMap<&str, Vec<u32>> =
-        //     FxHashMap::with_capacity_and_hasher(400, Default::default());
         for result in stream {
             match result {
                 Ok(article) => {
-                    // doc_postings.clear();
                     let mut doc_postings: FxHashMap<&str, Vec<u32>> =
                         FxHashMap::with_capacity_and_hasher(400, Default::default());
 
@@ -328,10 +127,6 @@ impl Indexer {
                     let plain_text = extract_plaintext(&article.text);
                     let tokens = search_tokenizer.tokenize(&plain_text);
 
-                    // if article.title.contains("Fell") {
-                    //     println!("{}", plain_text);
-                    //     println!("{:?}", tokens);
-                    // }
                     local_lengths.push(tokens.len() as u32);
                     local_names.push(article.title);
                     local_urls.push(article.url);
@@ -353,10 +148,6 @@ impl Indexer {
                         };
                         terms.push(term);
                     }
-
-                    // doc_postings.clear();
-                    // }
-
                     local_doc_index += 1;
                 }
                 Err(e) => {
@@ -374,61 +165,37 @@ impl Indexer {
             // Reserve doc_id range atomically
             let start_id = doc_id.fetch_add(local_lengths.len() as u32, Ordering::SeqCst);
 
-            // let mut article_metadata = article_metadata.lock().unwrap();
-            // Push all data at once
-
-            // for i in start_id..start_id + local_lengths.len() as u32 {
-
-            // }
-            // article_metadata.doc_length.extend(local_lengths);
-            // article_metadata.doc_names.extend(local_names);
-            // article_metadata.doc_urls.extend(local_urls);
-
-            lengths.extend(local_lengths);
-            names.extend(local_names);
-            urls.extend(local_urls);
+            lengths.append(&mut local_lengths);
+            names.append(&mut local_names);
+            urls.append(&mut local_urls);
 
             start_id
         }; // Locks released here
 
-        // println!("current doc_id {}", start_doc_id);
-        // Now fix all the doc_ids in terms
         for term in &mut terms {
-            term.posting.doc_id = start_doc_id + term.posting.doc_id + 1; // +1 if 1-indexed
+            term.posting.doc_id = start_doc_id + term.posting.doc_id + 1;
         }
 
         tx.send(terms).unwrap();
-        // let now_time = SystemTime::now();
-        // println!("time taken {:?}", now_time.duration_since(current_time));
+
         Ok(())
     }
 
     fn process_directory(
         dir_path: &Path,
-        tx: &mpsc::Sender<Vec<Term>>,
+        tx: &mpsc::SyncSender<Vec<Term>>,
         doc_id: &Arc<AtomicU32>,
         doc_lengths: &Arc<Mutex<Vec<u32>>>,
         doc_urls: &Arc<Mutex<Vec<String>>>,
         doc_names: &Arc<Mutex<Vec<String>>>,
-        // article_metadata: &Arc<Mutex<ArticleMetadata>>,
         search_tokenizer: &SearchTokenizer,
     ) -> io::Result<()> {
-        // let mut number_of_articles: u32 = 0;
         let current_time = SystemTime::now();
 
         for entry in std::fs::read_dir(dir_path).unwrap() {
             let entry = entry.unwrap();
             let path = entry.path();
-            // if self.doc_id == 500_000 {
-            //     return Ok(number_of_articles);
-            // }
-            // if path.is_dir() {
-            //     // Recursively process subdirectories
-            //     number_of_articles += self.process_directory(&path, &tx).unwrap();
-            // } else
-
             if path.extension().and_then(|s| s.to_str()) == Some("zstd") {
-                // println!("Processing: {:?}", path);
                 Indexer::read_zstd_file(
                     &path,
                     tx,
@@ -436,14 +203,9 @@ impl Indexer {
                     doc_lengths,
                     doc_urls,
                     doc_names,
-                    // article_metadata,
                     search_tokenizer,
                 )?;
             }
-            // } else if path.extension().and_then(|s| s.to_str()) == Some("pdf") {
-            //     println!("Processing: {:?}", path);
-            // number_of_articles += 1;
-            // }
         }
         let now_time = SystemTime::now();
         println!(
@@ -474,8 +236,7 @@ impl Indexer {
         self.merge_spimi_files()
     }
     fn spimi(&mut self) -> io::Result<()> {
-        let (tx, rx) = mpsc::channel::<Vec<Term>>();
-
+        let (tx, rx) = mpsc::sync_channel::<Vec<Term>>(10); // Only buffer 5 batches
         let files: Vec<_> = std::fs::read_dir(self.get_index_directory_path())
             .unwrap()
             .filter_map(|e| e.ok())
@@ -485,11 +246,9 @@ impl Indexer {
         let estimated_docs = 6_000_000;
         let doc_id = Arc::new(AtomicU32::new(0));
 
-        // Use Mutex<Vec> but pre-allocate and use doc_id as index
         let doc_lengths = Arc::new(Mutex::new(Vec::with_capacity(estimated_docs)));
         let doc_names = Arc::new(Mutex::new(Vec::with_capacity(estimated_docs)));
         let doc_urls = Arc::new(Mutex::new(Vec::with_capacity(estimated_docs)));
-        // let article_metadata = Arc::new(Mutex::new(ArticleMetadata::new()));
 
         let mut spmi = Spimi::new(self.get_result_directory_path());
         let handle = thread::spawn(move || {
@@ -504,13 +263,11 @@ impl Indexer {
             .chunks(chunk_size)
             .map(|chunk| {
                 let chunk = chunk.to_vec();
-
                 let tx = tx.clone();
                 let doc_id = Arc::clone(&doc_id);
                 let doc_lengths = Arc::clone(&doc_lengths);
                 let doc_names = Arc::clone(&doc_names);
                 let doc_urls = Arc::clone(&doc_urls);
-                // let article_metadata = Arc::clone(&article_metadata);
                 let tokenizer = self.search_tokenizer.clone();
                 thread::spawn(move || {
                     let mut files_processed = 0;
@@ -527,9 +284,6 @@ impl Indexer {
                         .unwrap();
                         files_processed += 1;
                         println!("Out of {} files, done with {}", chunk_size, files_processed);
-                        // if files_processed == 10 {
-                        //     return;
-                        // }
                     }
                 })
             })
@@ -585,7 +339,7 @@ impl Indexer {
     fn merge_spimi_files(&mut self) -> io::Result<InMemoryIndex> {
         let mut spmi = Spimi::new(self.get_result_directory_path());
         let result = spmi
-            .merge_index_files(
+            .merge_spimi_index_files(
                 self.avg_doc_length,
                 self.include_positions,
                 &self.document_lengths,
@@ -611,29 +365,35 @@ impl Indexer {
 
 #[cfg(test)]
 mod tests {
-    use tempfile::TempDir;
+    use std::fs;
 
     use super::*;
 
     #[test]
     fn test_spimi_index() {
         let query_parser = SearchTokenizer::new().unwrap();
-        let temp_dir = TempDir::new().unwrap();
-        let result_path = temp_dir.path().to_str().unwrap().to_string();
+        // let temp_dir = TempDir::new().unwrap();
+        let result_path = "index_run_2".to_string();
+        let path = Path::new(&result_path);
+        if !path.exists() {
+            fs::create_dir_all(path).unwrap();
+        } else if path.is_file() {
+            fs::remove_file(path).unwrap();
+            fs::create_dir_all(path).unwrap();
+        }
         let mut indexer =
             Indexer::new(query_parser, CompressionAlgorithm::VarByte, result_path).unwrap();
         let index_directory_path =
             Path::new("enwiki-20171001-pages-meta-current-withlinks-processed");
-        println!("{}", index_directory_path.to_str().unwrap().to_string());
         indexer.set_index_directory_path(index_directory_path.to_str().unwrap().to_string());
-        indexer.index().unwrap();
+        indexer.spimi().unwrap();
     }
 
     #[test]
-    fn test_spmi_merge() {
+    fn test_spimi_merge() {
         let mut spimi = Spimi::new("index_run_2".to_string());
         spimi
-            .merge_index_files(
+            .merge_spimi_index_files(
                 300.0,
                 false,
                 &Vec::new(),

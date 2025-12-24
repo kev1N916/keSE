@@ -1,5 +1,4 @@
 use std::{
-    alloc::System,
     f32,
     fs::{self, File},
     io::{self, BufReader, BufWriter, Write},
@@ -13,17 +12,23 @@ use crate::{
     dictionary::Dictionary,
     in_memory_index::in_memory_index::InMemoryIndex,
     indexer::{
-        helper::vb_encode_posting_list, index_merge_iterator::IndexMergeIterator,
-        index_merge_writer::MergedIndexBlockWriter, spimi,
+        helper::vb_encode_posting_list,
+        spimi::{spimi_iterator::SpimiIterator, spimi_merge_writer::SpimiMergeWriter},
     },
     scoring::bm_25::{BM25Params, compute_term_score},
     utils::{
         chunk_block_max_metadata::ChunkBlockMaxMetadata,
-        posting::{Posting, merge_all_postings, merge_postings},
+        posting::{Posting, merge_all_postings},
         term::Term,
     },
 };
 
+// Single Pass In Memory Indexing is performed by accumulating posting lists in memory
+// and writing to the disk after this memory exceeds a certain size.
+// The size of this dictionary is set according to us, currently it is 200 mb.
+// We write multiple dictionaries to the disk which act as temporary inverted indexes and then finally
+// perform a merge over all these temprary indexes.
+// Since the dictionaries are sorted before writing to the disk performing a merge is easy.
 pub struct Spimi {
     dictionary: Dictionary,
     result_directory_path: String,
@@ -37,9 +42,9 @@ impl Spimi {
         }
     }
 
-    fn is_pure_alphabets_with_hyphen(text: &str) -> bool {
-        !text.is_empty() && text.chars().all(|c| c.is_alphabetic() || c == '-')
-    }
+    // We receive vectors which contain posting lists through a channel and write it to our
+    // in memory dictionary. Once the dictionary exceeds a maximum size it is written to disk.
+    // All the temporary indexes can be identified through the .tmpidx file name.
     pub fn single_pass_in_memory_indexing(
         &mut self,
         rx: mpsc::Receiver<Vec<Term>>,
@@ -50,34 +55,32 @@ impl Spimi {
         while let Ok(terms) = rx.recv() {
             for term in terms {
                 if self.dictionary.size() >= self.dictionary.max_size() {
-                    // let sorted_terms = self.dictionary.sort_terms();
                     self.write_dictionary_to_disk(
                         path.join(spmi_index.to_string() + ".tmpidx").as_path(),
-                        // &sorted_terms,
                         &self.dictionary,
                     )?;
                     spmi_index += 1;
                     self.dictionary.clear();
                 }
-                let does_term_already_exist = self.dictionary.does_term_already_exist(&term.term);
-                if !does_term_already_exist {
-                    self.dictionary.add_term(&term.term);
-                }
+
+                self.dictionary.add_term(&term.term);
                 self.dictionary.append_to_term(&term.term, term.posting);
             }
         }
-        // let sorted_terms = self.dictionary.sort_terms();
-        // if sorted_terms.len() > 0 {
+
+        // Once the channel is closed there may still be unwritten posting lists in the dictionary
+        // which have to be flushed to disk.
         self.write_dictionary_to_disk(
             path.join(spmi_index.to_string() + ".tmpidx").as_path(),
-            // &sorted_terms,
             &self.dictionary,
         )?;
-        // }
         Ok(())
     }
 
-    pub fn merge_index_files(
+    // Merges the temporary index files produced by the SPIMI run into a final file which is written to inverted_index.idx
+    // It produces an InMemoryIndex which contains metadata related to the final inverted index file which is used during
+    // query processing.
+    pub fn merge_spimi_index_files(
         &mut self,
         l_avg: f32,
         include_positions: bool,
@@ -87,7 +90,10 @@ impl Spimi {
     ) -> Result<InMemoryIndex, io::Error> {
         let current_time = SystemTime::now();
         let mut in_memory_index: InMemoryIndex = InMemoryIndex::new();
-        let mut merge_iterators = Self::scan_and_create_iterators(&self.result_directory_path)?;
+
+        // Iterators are created over our temporary index files
+        let mut merge_iterators =
+            SpimiIterator::scan_and_create_iterators(&self.result_directory_path)?;
         if merge_iterators.is_empty() {
             return Ok(in_memory_index);
         }
@@ -95,16 +101,20 @@ impl Spimi {
         let mut no_of_terms: u32 = 0;
         let path = Path::new(&self.result_directory_path);
         let final_index_file = File::create(path.join("inverted_index.idx").as_path())?;
-        let mut index_merge_writer: MergedIndexBlockWriter = MergedIndexBlockWriter::new(
+
+        // The index writer is used to efficiently create our inverted index
+        let mut index_merge_writer: SpimiMergeWriter = SpimiMergeWriter::new(
             final_index_file,
             Some(chunk_size),
             None,
             include_positions,
             compression_algorithm,
         );
-        let params = BM25Params::default();
+        // The BM25 scoring params are created.
+        let bm25_params = BM25Params::default();
         loop {
-            // Find the smallest current term among all iterators that still have terms
+            // We iterate over our iterators to find the smallest term
+            // Since the size of the vector is quite small I have chosen to just loop over it.
             let smallest_term = merge_iterators
                 .iter()
                 .filter_map(|it| it.current_term.as_ref())
@@ -116,55 +126,55 @@ impl Spimi {
                 break;
             };
 
-            // let should_index = Spimi::is_pure_alphabets_with_hyphen(&term);
-            // let current_time = SystemTime::now();
-
-            // println!(
-            //     "current term merge ongoing {} but are we going to index it {} ",
-            //     term, should_index
-            // );
+            // The posting lists from the different iterators are accumulated and then merged
+            // to create the final posting list for the current term.
             let mut posting_lists: Vec<Vec<Posting>> = Vec::new();
             for it in merge_iterators.iter_mut() {
                 if let Some(curr_term) = &it.current_term {
                     if curr_term == &term {
-                        // if should_index {
                         if let Some(postings) = it.current_postings.take() {
                             posting_lists.push(postings);
                         }
-                        // }
                         it.next()?;
                     }
                 }
             }
-            // if !should_index {
-            //     continue;
-            // }
-
-            // println!(
-            //     "current term merge ongoing {} but are we going to index it {} ",
-            //     term, should_index
-            // );
-
-            no_of_terms = no_of_terms + 1;
-
             let final_merged = merge_all_postings(&posting_lists);
 
-            let f_t = final_merged.len() as u32;
+            no_of_terms += 1;
+
+            // The term_frequency is calculated for ranked retrieval
+            let term_frequency = final_merged.len() as u32;
+            in_memory_index.set_term_frequency(&term, term_frequency);
+
+            // The max_term_score is used for WAND ranked retrieval and needs to be calculated here
+            // and stored as metadata
             let mut max_term_score: f32 = f32::MIN;
+            // The chunk_max_term_score is used for BLOCK_MAX ranked retrieval algorithms and needs to be calculated here
+            // and stored as metadata
             let mut chunk_max_term_score: f32 = f32::MIN;
             let mut chunk_metadata: Vec<ChunkBlockMaxMetadata> = Vec::new();
             let mut chunk_index: usize = 0;
 
-            // println!("the length of the merged posting list {}", f_t);
             for posting in &final_merged {
                 let f_dt = posting.positions.len() as u32;
                 // let l_d = document_lengths[(posting.doc_id - 1) as usize];
                 let l_d = 200;
-                let term_score: f32 =
-                    compute_term_score(f_dt, l_d, l_avg, in_memory_index.no_of_docs, f_t, &params);
+                // We compute the contribution of this document to the term_score
+                let term_score: f32 = compute_term_score(
+                    f_dt,
+                    l_d,
+                    l_avg,
+                    in_memory_index.no_of_docs,
+                    term_frequency,
+                    &bm25_params,
+                );
+                // The document may contribute to the max_term_score
                 max_term_score = max_term_score.max(term_score);
-                chunk_max_term_score = chunk_max_term_score.max(term_score);
 
+                // The chunk_max_term_score is calculated but it is only added to the BlockMaxMetadata
+                // after the chunk is completed
+                chunk_max_term_score = chunk_max_term_score.max(term_score);
                 if (chunk_index + 1) % chunk_size as usize == 0 {
                     chunk_metadata.push(ChunkBlockMaxMetadata {
                         chunk_last_doc_id: posting.doc_id,
@@ -176,35 +186,37 @@ impl Spimi {
             }
             if chunk_max_term_score != f32::MIN {
                 chunk_metadata.push(ChunkBlockMaxMetadata {
-                    chunk_last_doc_id: final_merged[f_t as usize - 1].doc_id,
+                    chunk_last_doc_id: final_merged[term_frequency as usize - 1].doc_id,
                     chunk_max_term_score,
                 });
             }
+
             index_merge_writer.add_term(no_of_terms, final_merged)?;
+
+            // We add the term to term_id mapping, the max_term_score the and the metadata for
+            // block max ranking to the in memory index.
             in_memory_index.set_term_id(&term, no_of_terms);
             in_memory_index.set_max_term_score(&term, max_term_score);
             in_memory_index.set_chunk_block_max_metadata(&term, chunk_metadata);
-
-            // in_memory_index.add_term_to_bk_tree(term);
-            // let now_time = SystemTime::now();
-            // println!(
-            //     "time taken to comple {:?}",
-            //     now_time.duration_since(current_time)
-            // );
+            // We add the term to the bk_tree as well which helps speed up retrieval
+            in_memory_index.add_term_to_bk_tree(term);
         }
-
+        // We close the index_merge_writer so that the remaining terms can be written to the disk.
         index_merge_writer.close()?;
+
+        // We need to also keep track of the blocks over which the terms spans.
+        // This is required during retrieval.
         for term in in_memory_index.get_all_terms() {
             let term_id = in_memory_index.get_term_id(&term);
             if term_id != 0 {
                 if let Some(term_metadata) = index_merge_writer.get_term_metadata(term_id) {
-                    // in_memory_index.set_block_ids(&term, term_metadata.block_ids.clone());
                     in_memory_index
                         .set_block_ids(&term, std::mem::take(&mut term_metadata.block_ids));
-                    in_memory_index.set_term_frequency(&term, term_metadata.term_frequency);
                 }
             }
         }
+
+        // We keep track of total no of blocks and total no of terms
         in_memory_index.no_of_blocks = index_merge_writer.current_block_no;
         in_memory_index.no_of_terms = no_of_terms;
         let now_time = SystemTime::now();
@@ -216,36 +228,10 @@ impl Spimi {
         Ok(in_memory_index)
     }
 
-    fn scan_and_create_iterators(directory: &str) -> io::Result<Vec<IndexMergeIterator>> {
-        let mut iterators = Vec::new();
-
-        // Read directory entries
-        for entry in fs::read_dir(directory)? {
-            let entry = entry?;
-            let path = entry.path();
-
-            // Check for .idx files
-            if path.is_file() {
-                if let Some(ext) = path.extension() {
-                    if ext == "tmpidx" {
-                        let file = File::open(&path)?;
-                        let file_reader = BufReader::new(file);
-                        let mut merge_iter = IndexMergeIterator::new(file_reader);
-                        merge_iter.init()?; // Initialize the iterator
-                        iterators.push(merge_iter);
-                        println!("Created iterator for: {}", path.display());
-                    }
-                }
-            }
-        }
-
-        Ok(iterators)
-    }
-
+    // We iterate over the posting lists in the dictionary and write them to disk
     fn write_dictionary_to_disk(
         &self,
         filename: &Path,
-        // sorted_terms: &Vec<String>,
         dict: &Dictionary,
     ) -> Result<(), std::io::Error> {
         if dict.no_of_terms > 0 {
@@ -260,6 +246,7 @@ impl Spimi {
         Ok(())
     }
 
+    // The posting list is encoded before being written to the disk.
     fn write_term_to_disk(
         &self,
         writer: &mut BufWriter<File>,

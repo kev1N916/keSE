@@ -1,23 +1,8 @@
-use std::{env, io};
+use std::io;
 // A custom error type to represent our possible errors
 #[derive(Debug)]
 pub enum TokenizationError {
-    InitializationError,
-    InvalidUtf8(std::string::FromUtf8Error),
     EmptyInput,
-    LemmatizerError(std::io::Error),
-}
-
-impl From<std::string::FromUtf8Error> for TokenizationError {
-    fn from(error: std::string::FromUtf8Error) -> Self {
-        TokenizationError::InvalidUtf8(error)
-    }
-}
-
-impl From<std::io::Error> for TokenizationError {
-    fn from(error: std::io::Error) -> Self {
-        TokenizationError::LemmatizerError(error)
-    }
 }
 
 #[derive(Debug)]
@@ -26,16 +11,6 @@ pub struct Token {
     pub word: String,
 }
 
-#[derive(Debug, Clone)]
-pub struct Lemmatizer {
-    lemmas: HashMap<String, String>,
-}
-
-impl Lemmatizer {
-    pub fn lemmatize(&self, word: &str) -> Option<&String> {
-        self.lemmas.get(word)
-    }
-}
 const STOP_WORDS: &[&str] = &[
     "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "he", "in", "is", "it",
     "its", "of", "on", "that", "the", "to", "was", "will", "with", "the", "this", "but", "they",
@@ -46,50 +21,10 @@ const STOP_WORDS: &[&str] = &[
 
 #[derive(Debug, Clone)]
 pub struct SearchTokenizer {
-    // lemmatizer: Lemmatizer,
     stop_word_set: HashSet<String>,
 }
 
-use std::collections::{HashMap, HashSet};
-use std::fs::File;
-use std::io::{BufRead, BufReader};
-
-pub fn parse_lemma(file_path: &str) -> Result<HashMap<String, String>, io::Error> {
-    let file = File::open(file_path)?;
-    let reader = BufReader::new(file);
-
-    let mut word_map: HashMap<String, String> = HashMap::new();
-
-    for line in reader.lines() {
-        let line = line?;
-
-        // Skip empty lines
-        if line.trim().is_empty() {
-            continue;
-        }
-
-        // Find the first comma to split key and values
-        if let Some(comma_pos) = line.find(',') {
-            let key = &line[..comma_pos].trim().to_string();
-            let values_str = &line[comma_pos + 1..];
-
-            // Remove surrounding quotes if present
-            let values_str = values_str.trim().trim_matches('"');
-
-            let all_words: Vec<String> = values_str
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-
-            for word in all_words {
-                word_map.insert(word, key.clone());
-            }
-        }
-    }
-
-    Ok(word_map)
-}
+use std::collections::HashSet;
 
 pub fn clean_word(word: &str) -> String {
     // First trim, then lowercase (only lowercase what we need)
@@ -108,25 +43,8 @@ pub struct TokenizeQueryResult {
 
 impl SearchTokenizer {
     pub fn new() -> Result<SearchTokenizer, io::Error> {
-        let current_dir = env::current_dir()?;
-        let path_as_string = format!("{}", current_dir.display());
-        let mut path = path_as_string.to_string();
-        path += "/src";
-        // let lemmatizer_path = path.clone() + "/lemmas.txt";
-
-        // let lemmas = parse_lemma(&lemmatizer_path)?;
-        // // println!("size of lemma map {}", lemmas.len());
-        // let lemmatizer = Lemmatizer {
-        //     lemmas: HashMap::new(),
-        // };
-
-        // Initialize stop word set
         let stop_word_set: HashSet<String> = STOP_WORDS.iter().map(|&s| s.to_string()).collect();
-
-        Ok(SearchTokenizer {
-            // lemmatizer,
-            stop_word_set,
-        })
+        Ok(SearchTokenizer { stop_word_set })
     }
 
     pub fn tokenize_query(
@@ -147,18 +65,10 @@ impl SearchTokenizer {
                 && !self.stop_word_set.contains(&cleaned_word)
                 && is_valid_token(&cleaned_word)
             {
-                // Get lemma or use cleaned_word, avoid cloning in the match
-                // if let Some(token_word) = self.lemmatizer.lemmatize(&cleaned_word) {
-                //     unigram_tokens.push(Token {
-                //         position,
-                //         word: token_word.to_string(),
-                //     });
-                // } else {
                 unigram_tokens.push(Token {
                     position,
                     word: cleaned_word,
                 });
-                // }
             }
 
             position += 1;
@@ -184,18 +94,10 @@ impl SearchTokenizer {
                 && !self.stop_word_set.contains(&cleaned_word)
                 && is_valid_token(&cleaned_word)
             {
-                // Get lemma or use cleaned_word, avoid cloning in the match
-                // if let Some(token_word) = self.lemmatizer.lemmatize(&cleaned_word) {
-                //     tokens.push(Token {
-                //         position,
-                //         word: token_word.to_string(),
-                //     });
-                // } else {
                 tokens.push(Token {
                     position,
                     word: cleaned_word,
                 });
-                // }
             }
 
             position += 1;
@@ -208,11 +110,6 @@ impl SearchTokenizer {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // Helper function to create a test tokenizer
-    fn create_test_tokenizer() -> SearchTokenizer {
-        SearchTokenizer::new().expect("Failed to create tokenizer")
-    }
 
     #[test]
     fn test_new_tokenizer_creation() {

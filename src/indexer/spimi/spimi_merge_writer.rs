@@ -2,7 +2,6 @@ use std::{
     collections::HashMap,
     fs::File,
     io::{self, BufWriter, Write},
-    time::SystemTime,
 };
 
 use crate::{
@@ -10,58 +9,15 @@ use crate::{
     utils::{block::Block, chunk::Chunk, posting::Posting},
 };
 
-/*
-An inverted list in the index will often stretch across
-multiple blocks, starting somewhere in one block and ending some-
-where in another block. Blocks are the basic unit for fetching index
-data from disk, and for caching index data in main memory.
-Each block contains a large number of postings from one or
-more inverted lists. These postings are again divided into chunks.
-For example, we may divide the postings of an inverted list into
-chunks with at max 128 postings each.
-A block then consists of some metadata at the beginning, with information about how many
-inverted lists are in this block and where they start.
-Chunks are our basic unit for decompressing inverted
-index data, and decompression code is tuned to decompress a chunk
-in fractions of a microsecond. (In fact, this index organization al-
-lows us to first decode all docIDs of a chunk, and then later the
-frequencies or positions if needed.)
-
-Block Layout->
-
-Block Metadata
-Chunk1
-Chunk2
-.
-.
-.
-ChunkN
-
-Chunk Layout->
-ChunkMetadata
-doc_ids
-posting_lists
-
-*/
-
-/*
-Will be stored in every block at the beginning
-All the numbers here will be VB-encoded
- */
-// pub struct BlockMetadata {
-//     terms_in_block: Vec<u32>,
-//     offsets_of_terms_in_block: Vec<u16>, // total bytes occupied by the term in the block can be derived from here
-// }
-
-/*
-Will be stored in every chunk at the beginning
-All the numbers here will be VB-encoded
- */
-// #[derive(Debug, Clone, PartialEq)]
-// pub struct ChunkMetadata {
-//     max_doc_id: u32,
-//     size_of_chunk: u32,
-// }
+// An inverted list in the index will often stretch across multiple blocks, starting somewhere in one block and ending some-
+// where in another block. Blocks are the basic unit for fetching index data from disk, and for caching index data in main memory.
+// Each block contains a large number of postings from one or more inverted lists. These postings are again divided into chunks.
+// For example, we may divide the postings of an inverted list into chunks with at max 128 postings each.
+// A block then consists of some metadata at the beginning, with information about how many inverted lists are in
+// this block and where they start. Chunks are our basic unit for decompressing inverted index data,
+// and decompression code is tuned to decompress a chunk in fractions of a microsecond.
+// (In fact, this index organization allows us to first decode all docIDs of a chunk, and then later the
+// frequencies or positions if needed.)
 
 pub struct TermMetadata {
     pub block_ids: Vec<u32>,
@@ -76,18 +32,18 @@ impl TermMetadata {
         self.term_frequency = term_frequency;
     }
 }
-pub struct MergedIndexBlockWriter {
-    buffered_block_bytes: Vec<u8>,
+pub struct SpimiMergeWriter {
+    buffered_block_bytes: Vec<u8>, // the buffered block bytes which are written to the disk at intervals
     pub term_metadata: HashMap<u32, TermMetadata>,
-    pub current_block_no: u32,
-    pub current_block: Block,
-    pub include_positions: bool,
+    pub current_block_no: u32,   // the id or number of the current block
+    pub current_block: Block,    // the current block which is being written to
+    pub include_positions: bool, // whether or not positions should be included in our chunks
     file_writer: BufWriter<File>,
-    compression_algorithm: CompressionAlgorithm,
-    pub chunk_size: u8, // Maximum number of postings in a single chunk
+    compression_algorithm: CompressionAlgorithm, // the compression algorithm which is going to be used for the chunks
+    pub chunk_size: u8,                          // maximum number of postings in a single chunk
 }
 
-impl MergedIndexBlockWriter {
+impl SpimiMergeWriter {
     pub fn new(
         file: File,
         chunk_size: Option<u8>,
@@ -96,23 +52,20 @@ impl MergedIndexBlockWriter {
         compression_algorithm: CompressionAlgorithm,
     ) -> Self {
         Self {
-            buffered_block_bytes: Vec::with_capacity(5_000_000),
+            buffered_block_bytes: Vec::with_capacity(3_000_000),
             term_metadata: HashMap::new(),
             current_block_no: 0,
             current_block: Block::new(0, block_size),
             include_positions,
             file_writer: BufWriter::new(file),
             compression_algorithm,
-            chunk_size: match chunk_size {
-                Some(chunk_size) => chunk_size,
-                None => 128,
-            },
+            chunk_size: chunk_size.unwrap_or(128),
         }
     }
 
     pub fn finish(&mut self) -> io::Result<()> {
-        let block_bytes = self.current_block.encode();
-        self.buffered_block_bytes.extend(block_bytes);
+        self.buffered_block_bytes
+            .extend(self.current_block.encode());
         self.file_writer.write_all(&self.buffered_block_bytes)?;
         self.flush()?;
         self.current_block_no += 1;
@@ -135,7 +88,7 @@ impl MergedIndexBlockWriter {
     }
     fn initialize_term_metadata(&mut self, term: u32) {
         self.term_metadata.entry(term).or_insert(TermMetadata {
-            block_ids: Vec::new(),
+            block_ids: Vec::with_capacity(4),
             term_frequency: 0,
         });
     }
@@ -143,7 +96,6 @@ impl MergedIndexBlockWriter {
         self.term_metadata.get_mut(&term).take()
     }
     pub fn add_term(&mut self, term: u32, postings: Vec<Posting>) -> io::Result<()> {
-        // let current_time = SystemTime::now();
         // if it is not possible to add a new term to the block then we will reset the block
         // the minimum number of bytes necessary to add a new term is 6 bytes for term and term_offset
         // 9 bytes for the empty chunk
@@ -152,8 +104,6 @@ impl MergedIndexBlockWriter {
             self.write_block_to_index_file()?;
             self.current_block.reset();
         }
-        // After this the term is going to be in the block and a new chunk is going to be
-        // created
         self.initialize_term_metadata(term);
         self.add_block_to_term_metadata(term, self.current_block_no);
         self.add_frequency_to_term_metadata(term, postings.len() as u32);
@@ -182,34 +132,11 @@ impl MergedIndexBlockWriter {
                 }
 
                 if i == postings_length {
-                    // let now_time = SystemTime::now();
-
-                    // println!(
-                    //     "time taken to complete add_term is  {:?}",
-                    //     now_time.duration_since(current_time)
-                    // );
                     return Ok(());
                 }
 
                 current_chunk.reset();
             }
-            // if i == postings.len() {
-            //     let chunk_bytes = current_chunk.encode();
-            //     if self.current_block.space_left() >= chunk_bytes.len() as u32 {
-            //         self.current_block.add_chunk_bytes(chunk_bytes);
-            //     } else {
-            //         self.write_block_to_index_file()?;
-            //         self.current_block.reset();
-            //         self.current_block.add_term(term);
-            //         self.add_block_to_term_metadata(term, self.current_block_no);
-            //         if chunk_bytes.len() as u32 > self.current_block.space_left() {
-            //             panic!("chunk cannot fit in block")
-            //         }
-            //         self.current_block.add_chunk_bytes(chunk_bytes);
-            //     }
-            //     return Ok(());
-            // }
-
             let current_posting = match postings_iter.next() {
                 Some(p) => p,
                 None => {
@@ -226,12 +153,6 @@ impl MergedIndexBlockWriter {
                         }
                         self.current_block.add_chunk_bytes(chunk_bytes);
                     }
-                    // let now_time = SystemTime::now();
-
-                    // println!(
-                    //     "time taken to complete add_term is  {:?}",
-                    //     now_time.duration_since(current_time)
-                    // );
                     return Ok(());
                 }
             };
@@ -247,27 +168,18 @@ impl MergedIndexBlockWriter {
     }
 
     fn write_block_to_index_file(&mut self) -> io::Result<()> {
-        // println!("started the write to buffer");
-        let block_bytes = self.current_block.encode();
-        self.buffered_block_bytes.extend(block_bytes);
+        self.buffered_block_bytes
+            .extend(self.current_block.encode());
         if self.buffered_block_bytes.len() >= 3_000_000 {
-            let current_time = SystemTime::now();
-            // println!("started the write to disk");
             self.file_writer.write_all(&self.buffered_block_bytes)?;
             self.flush()?;
             self.buffered_block_bytes.clear();
-            let now_time = SystemTime::now();
-            println!(
-                "time taken to complete write to disk is  {:?}",
-                now_time.duration_since(current_time)
-            );
         }
         self.current_block_no += 1;
         Ok(())
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        // println!("started the flush to disk");
         self.file_writer.flush()?;
         Ok(())
     }
@@ -288,8 +200,7 @@ mod tests {
     fn test_new_writer() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let writer =
-            MergedIndexBlockWriter::new(file, None, None, true, CompressionAlgorithm::Simple16);
+        let writer = SpimiMergeWriter::new(file, None, None, true, CompressionAlgorithm::Simple16);
 
         assert_eq!(writer.term_metadata.len(), 0);
         assert_eq!(writer.current_block_no, 0);
@@ -301,7 +212,7 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
         let writer =
-            MergedIndexBlockWriter::new(file, Some(64), None, true, CompressionAlgorithm::Simple16);
+            SpimiMergeWriter::new(file, Some(64), None, true, CompressionAlgorithm::Simple16);
 
         assert_eq!(writer.chunk_size, 64);
     }
@@ -311,7 +222,7 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
         let mut writer =
-            MergedIndexBlockWriter::new(file, Some(64), None, true, CompressionAlgorithm::Simple16);
+            SpimiMergeWriter::new(file, Some(64), None, true, CompressionAlgorithm::Simple16);
 
         let postings = vec![
             create_test_postings(10, vec![5, 10, 15]),
@@ -333,7 +244,7 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
         let mut writer =
-            MergedIndexBlockWriter::new(file, Some(64), None, true, CompressionAlgorithm::Simple16);
+            SpimiMergeWriter::new(file, Some(64), None, true, CompressionAlgorithm::Simple16);
 
         let postings1 = vec![create_test_postings(10, vec![1])];
         let postings2 = vec![create_test_postings(20, vec![2])];
@@ -361,7 +272,7 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
         let mut writer =
-            MergedIndexBlockWriter::new(file, Some(64), None, true, CompressionAlgorithm::Simple16);
+            SpimiMergeWriter::new(file, Some(64), None, true, CompressionAlgorithm::Simple16);
 
         // Create 150 postings to test chunk splitting (>128 postings per chunk)
         let mut postings = Vec::new();
@@ -382,7 +293,7 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
         let mut writer =
-            MergedIndexBlockWriter::new(file, None, Some(1), true, CompressionAlgorithm::Simple16);
+            SpimiMergeWriter::new(file, None, Some(1), true, CompressionAlgorithm::Simple16);
 
         let postings = vec![create_test_postings(10, vec![1, 2, 3, 4, 5])];
 
@@ -401,7 +312,7 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
         let mut writer =
-            MergedIndexBlockWriter::new(file, None, Some(64), true, CompressionAlgorithm::Simple16);
+            SpimiMergeWriter::new(file, None, Some(64), true, CompressionAlgorithm::Simple16);
 
         let postings = vec![];
 
@@ -418,7 +329,7 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
         let mut writer =
-            MergedIndexBlockWriter::new(file, None, Some(64), true, CompressionAlgorithm::Simple16);
+            SpimiMergeWriter::new(file, None, Some(64), true, CompressionAlgorithm::Simple16);
 
         let postings = vec![
             create_test_postings(10, vec![]),
@@ -438,7 +349,7 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
         let mut writer =
-            MergedIndexBlockWriter::new(file, None, Some(64), true, CompressionAlgorithm::Simple16);
+            SpimiMergeWriter::new(file, None, Some(64), true, CompressionAlgorithm::Simple16);
 
         // Create a posting with many positions
         let positions: Vec<u32> = (0..100).map(|i| i * 10).collect();
@@ -457,7 +368,7 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
         let mut writer =
-            MergedIndexBlockWriter::new(file, None, Some(64), true, CompressionAlgorithm::Simple16);
+            SpimiMergeWriter::new(file, None, Some(64), true, CompressionAlgorithm::Simple16);
 
         let postings = vec![
             create_test_postings(10, vec![5, 10]),
@@ -486,7 +397,7 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
         let mut writer =
-            MergedIndexBlockWriter::new(file, None, Some(64), true, CompressionAlgorithm::Simple16);
+            SpimiMergeWriter::new(file, None, Some(64), true, CompressionAlgorithm::Simple16);
 
         // Term 1: Few postings
         writer
@@ -531,7 +442,7 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
         let mut writer =
-            MergedIndexBlockWriter::new(file, None, Some(64), true, CompressionAlgorithm::VarByte);
+            SpimiMergeWriter::new(file, None, Some(64), true, CompressionAlgorithm::VarByte);
 
         let postings = vec![
             create_test_postings(u32::MAX - 1000, vec![1]),
@@ -551,13 +462,8 @@ mod tests {
     fn test_chunk_boundary_128_postings() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer = MergedIndexBlockWriter::new(
-            file,
-            None,
-            Some(128),
-            true,
-            CompressionAlgorithm::Simple16,
-        );
+        let mut writer =
+            SpimiMergeWriter::new(file, None, Some(128), true, CompressionAlgorithm::Simple16);
 
         // Exactly 128 postings - should fit in one chunk
         let postings: Vec<Posting> = (0..128).map(|i| create_test_postings(i, vec![1])).collect();
@@ -574,13 +480,8 @@ mod tests {
     fn test_chunk_boundary_129_postings() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer = MergedIndexBlockWriter::new(
-            file,
-            None,
-            Some(128),
-            true,
-            CompressionAlgorithm::Simple16,
-        );
+        let mut writer =
+            SpimiMergeWriter::new(file, None, Some(128), true, CompressionAlgorithm::Simple16);
 
         // 129 postings - should create multiple chunks
         let postings: Vec<Posting> = (0..129).map(|i| create_test_postings(i, vec![1])).collect();

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use crate::utils::posting::Posting;
 #[derive(Debug, Clone)]
@@ -18,9 +18,9 @@ impl Dictionary {
     }
 
     // max size of dictionary in bytes
-    // we are keeping it as 100 MB
+    // we are keeping it as 200 MB
     pub fn max_size(&self) -> u32 {
-        return 100_000_000;
+        return 200_000_000;
     }
     pub fn size(&self) -> u32 {
         self.current_size
@@ -30,6 +30,10 @@ impl Dictionary {
         self.current_size = 0;
         self.no_of_terms = 0;
     }
+
+    //   pub fn capacity(& self) {
+    //     self.dictionary.
+    // }
 
     pub fn does_term_already_exist(&mut self, term: &str) -> bool {
         return self.dictionary.contains_key(term);
@@ -51,7 +55,7 @@ impl Dictionary {
 
     pub fn add_term(&mut self, term: &str) {
         if !self.does_term_already_exist(term) {
-            self.dictionary.insert(String::from(term), Vec::new());
+            self.dictionary.insert(term.to_string(), Vec::new());
             self.current_size += 4;
             self.current_size += term.len() as u32;
             self.no_of_terms += 1;
@@ -63,11 +67,8 @@ impl Dictionary {
             let posting_length = posting.positions.len() as u32;
             postings_list.push(posting);
             self.current_size += 4 + 4 * posting_length + 4;
+            // postings_list.shrink_to_fit();
         }
-    }
-
-    pub fn sort_terms(&self) -> Vec<String> {
-        self.dictionary.keys().cloned().collect()
     }
 }
 
@@ -148,46 +149,6 @@ mod dictionary_tests {
     }
 
     #[test]
-    fn test_sort_terms_empty() {
-        let dict = Dictionary::new();
-        let sorted = dict.sort_terms();
-        assert_eq!(sorted.len(), 0);
-    }
-
-    #[test]
-    fn test_sort_terms_single_term() {
-        let mut dict = Dictionary::new();
-        dict.add_term("single");
-
-        let sorted = dict.sort_terms();
-        assert_eq!(sorted, vec!["single"]);
-    }
-
-    #[test]
-    fn test_sort_terms_multiple_terms() {
-        let mut dict = Dictionary::new();
-        dict.add_term("zebra");
-        dict.add_term("apple");
-        dict.add_term("banana");
-        dict.add_term("cherry");
-
-        let sorted = dict.sort_terms();
-        assert_eq!(sorted, vec!["apple", "banana", "cherry", "zebra"]);
-    }
-
-    #[test]
-    fn test_sort_terms_case_sensitivity() {
-        let mut dict = Dictionary::new();
-        dict.add_term("Zebra");
-        dict.add_term("apple");
-        dict.add_term("Banana");
-
-        let sorted = dict.sort_terms();
-        // Note: uppercase letters come before lowercase in ASCII ordering
-        assert_eq!(sorted, vec!["Banana", "Zebra", "apple"]);
-    }
-
-    #[test]
     fn test_overwrite_term_posting() {
         let mut dict = Dictionary::new();
         let initial_postings = vec![Posting::new(1, vec![1, 3])];
@@ -225,9 +186,6 @@ mod dictionary_tests {
         let index_postings = dict.get_postings("index").unwrap();
         assert_eq!(index_postings.len(), 1);
         assert_eq!(index_postings[0], Posting::new(3, vec![7]));
-
-        let sorted = dict.sort_terms();
-        assert_eq!(sorted, vec!["engine", "index", "search"]);
     }
 
     #[test]

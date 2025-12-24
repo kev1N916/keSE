@@ -3,16 +3,30 @@ use std::{
     io::{self, BufReader, Read, Seek},
 };
 
-use crate::{compressor::compressor::CompressionAlgorithm, utils::chunk::Chunk};
+use crate::{
+    compressor::compressor::CompressionAlgorithm,
+    indexer::helper::{vb_decode_positions, vb_encode_positions},
+    utils::chunk::Chunk,
+};
 
+/*
+ The unit of storage in our inverted index is a block.
+ Each term can span across multiple blocks and so we need to keep track of the block ids for
+ each term so that we can process queries.
+ The block layout consists first of the block metadata which includes the no of terms in the block and
+ then the term and the term offsets.
+ Following this metadata we have the actual chunks.
+ We use the term offsets to index into the chunks for a particular term.
+*/
 pub struct Block {
-    pub max_block_size: u8, // maximum size of block in kb
-    pub current_block_size: u32,
-    pub no_of_terms: u32,
+    pub max_block_size: u8,      // maximum size of block in kb
+    pub current_block_size: u32, // the current block size
     pub block_id: u32,
-    pub chunk_bytes: Vec<u8>,
-    pub terms: Vec<u32>,
-    pub term_offsets: Vec<u16>,
+    pub chunk_bytes: Vec<u8>, // constains all the encoded chunks which are present in this block
+    // Block Metadata
+    pub no_of_terms: u32,       // total number of terms stored in the block
+    pub terms: Vec<u32>,        // the terms which are present in the block
+    pub term_offsets: Vec<u16>, // the offset from where the chunks of the term starts
 }
 
 impl Block {
@@ -50,6 +64,8 @@ impl Block {
         self.no_of_terms = no_of_terms;
     }
 
+    // when we add a term we also add the the term offset which is basically the current length of
+    // chunk_bytes,which is where the chunks of the current term will start
     pub fn add_term(&mut self, term: u32) {
         self.current_block_size += 6;
         self.terms.push(term);
@@ -80,28 +96,9 @@ impl Block {
         self.current_block_size += chunk_bytes.len() as u32;
     }
 
-    pub fn encode(&mut self) -> Vec<u8> {
-        assert_eq!(self.term_offsets.len(), self.terms.len());
-        let block_size = self.max_block_size as usize * 1000;
-        let mut block_bytes: Vec<u8> = vec![0; block_size];
-        let mut offset = 0;
-        block_bytes[offset..offset + 4].copy_from_slice(&(self.terms.len() as u32).to_le_bytes());
-        offset += 4;
-        let encoded_terms: Vec<u8> = self.terms.iter().flat_map(|&n| n.to_le_bytes()).collect();
-        block_bytes[offset..offset + encoded_terms.len()].copy_from_slice(&encoded_terms);
-        offset += encoded_terms.len();
-        let encoded_term_offsets: Vec<u8> = self
-            .term_offsets
-            .iter()
-            .flat_map(|&n| n.to_le_bytes())
-            .collect();
-        block_bytes[offset..offset + encoded_term_offsets.len()]
-            .copy_from_slice(&encoded_term_offsets);
-        offset += encoded_term_offsets.len();
-        block_bytes[offset..offset + self.chunk_bytes.len()].copy_from_slice(&self.chunk_bytes);
-        block_bytes
-    }
-
+    // The chunks of the term will span accross its term offset and the next term offset
+    // if the term is at the end of this block then we will keep decoding chunks until
+    // we get a chunk which has a size of 0.
     pub fn decode_chunks_for_term(
         &self,
         term_id: u32,
@@ -125,6 +122,8 @@ impl Block {
                     .try_into()
                     .unwrap(),
             );
+            // if we are trying to get the chunks for the last term present in the block we stop when we reach
+            // a chunk of size 0
             if chunk_size == 0 {
                 break;
             }
@@ -136,24 +135,50 @@ impl Block {
         chunk_vec
     }
 
-    pub fn init(&mut self, reader: &mut BufReader<&mut File>) -> io::Result<()> {
+    // We store the no of terms, the terms, the term offsets and then the chunk_bytes
+    pub fn encode(&mut self) -> Vec<u8> {
+        assert_eq!(self.term_offsets.len(), self.terms.len());
+        let block_size = self.max_block_size as usize * 1000;
+        let mut block_bytes: Vec<u8> = vec![0; block_size];
+        let mut offset = 0;
+        block_bytes[offset..offset + 4].copy_from_slice(&(self.terms.len() as u32).to_le_bytes());
+        offset += 4;
+
+        // compress the terms and store them
+        let encoded_terms = vb_encode_positions(&self.terms);
+        block_bytes[offset..offset + 4]
+            .copy_from_slice(&(encoded_terms.len() as u32).to_le_bytes());
+        offset += 4;
+        block_bytes[offset..offset + encoded_terms.len()].copy_from_slice(&encoded_terms);
+        offset += encoded_terms.len();
+        let encoded_term_offsets: Vec<u8> = self
+            .term_offsets
+            .iter()
+            .flat_map(|&n| n.to_le_bytes())
+            .collect();
+        block_bytes[offset..offset + encoded_term_offsets.len()]
+            .copy_from_slice(&encoded_term_offsets);
+        offset += encoded_term_offsets.len();
+        block_bytes[offset..offset + self.chunk_bytes.len()].copy_from_slice(&self.chunk_bytes);
+        block_bytes
+    }
+
+    pub fn decode(&mut self, reader: &mut BufReader<&mut File>) -> io::Result<()> {
         let block_size = self.max_block_size as usize * 1000;
         reader.seek(std::io::SeekFrom::Start(
             (self.block_id * block_size as u32).into(),
         ))?;
-        println!("block_size {}", block_size);
         let mut block_bytes: Vec<u8> = vec![0; block_size];
         reader.read(&mut block_bytes).unwrap();
         let no_of_terms_in_block = u32::from_le_bytes(block_bytes[0..4].try_into().unwrap());
         self.no_of_terms = no_of_terms_in_block;
         let mut offset = 4;
-        let mut terms: Vec<u32> = Vec::new();
-        for _ in 0..no_of_terms_in_block {
-            let term_id = u32::from_le_bytes(block_bytes[offset..offset + 4].try_into().unwrap());
-            terms.push(term_id);
-            offset += 4;
-        }
-        self.terms = terms;
+        let encoded_terms_length =
+            u32::from_le_bytes(block_bytes[offset..offset + 4].try_into().unwrap());
+        offset += 4;
+        self.terms =
+            vb_decode_positions(&block_bytes[offset..offset + encoded_terms_length as usize]);
+        offset += encoded_terms_length as usize;
         let mut term_offsets: Vec<u16> = Vec::new();
         for _ in 0..no_of_terms_in_block {
             let term_offset =
@@ -168,8 +193,8 @@ impl Block {
 }
 
 #[cfg(test)]
-mod merged_index_block_writer_tests {
-    use crate::{indexer::index_merge_writer::MergedIndexBlockWriter, utils::posting::Posting};
+mod tests {
+    use crate::{indexer::spimi::spimi_merge_writer::SpimiMergeWriter, utils::posting::Posting};
 
     use super::*;
     use std::io::BufReader;
@@ -184,7 +209,7 @@ mod merged_index_block_writer_tests {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
         let mut writer =
-            MergedIndexBlockWriter::new(file, None, Some(64), true, CompressionAlgorithm::VarByte);
+            SpimiMergeWriter::new(file, None, Some(64), true, CompressionAlgorithm::VarByte);
 
         let postings = vec![
             create_test_posting(10, vec![5, 10, 15]),
@@ -200,7 +225,7 @@ mod merged_index_block_writer_tests {
 
         let metadata = writer.get_term_metadata(61).unwrap();
         let mut block = Block::new(metadata.block_ids[0], Some(64));
-        block.init(&mut reader).unwrap();
+        block.decode(&mut reader).unwrap();
 
         assert_eq!(block.no_of_terms, 1);
         assert_eq!(block.terms, vec![61]);
@@ -215,7 +240,7 @@ mod merged_index_block_writer_tests {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
         let mut writer =
-            MergedIndexBlockWriter::new(file, None, Some(64), true, CompressionAlgorithm::VarByte);
+            SpimiMergeWriter::new(file, None, Some(64), true, CompressionAlgorithm::VarByte);
 
         let postings1 = vec![create_test_posting(10, vec![1])];
         let postings2 = vec![create_test_posting(20, vec![2])];
@@ -230,7 +255,7 @@ mod merged_index_block_writer_tests {
 
         let metadata1 = writer.get_term_metadata(1).unwrap();
         let mut block = Block::new(metadata1.block_ids[0], Some(64));
-        block.init(&mut reader).unwrap();
+        block.decode(&mut reader).unwrap();
 
         assert_eq!(block.no_of_terms, 2);
         assert_eq!(block.terms, vec![1, 2]);
@@ -240,7 +265,7 @@ mod merged_index_block_writer_tests {
     fn test_sparse_doc_ids() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer = MergedIndexBlockWriter::new(
+        let mut writer = SpimiMergeWriter::new(
             file,
             Some(10),
             Some(64),
@@ -272,10 +297,11 @@ mod merged_index_block_writer_tests {
 
         let metadata = writer.get_term_metadata(1).unwrap();
         let mut block = Block::new(metadata.block_ids[0], Some(64));
-        block.init(&mut reader).unwrap();
+        block.decode(&mut reader).unwrap();
 
         let mut chunks = block.decode_chunks_for_term(1, 0, CompressionAlgorithm::VarByte);
         chunks[0].decode_doc_ids();
+        chunks[0].decode_doc_frequencies();
         assert_eq!(chunks[0].doc_ids.len(), 4);
 
         let posting1 = chunks[0].get_posting_list(0);
@@ -291,8 +317,8 @@ mod merged_index_block_writer_tests {
         assert_eq!(posting4, vec![4, 5, 6, 9, 10]);
 
         // Verify term 2
-        let chunks2 = block.decode_chunks_for_term(2, 1, CompressionAlgorithm::VarByte);
-
+        let mut chunks2 = block.decode_chunks_for_term(2, 1, CompressionAlgorithm::VarByte);
+        chunks2[0].decode_doc_frequencies();
         let posting1 = chunks2[0].get_posting_list(0);
         assert_eq!(posting1, vec![1, 6, 7, 13, 20]);
 
@@ -310,7 +336,7 @@ mod merged_index_block_writer_tests {
     fn test_multiple_blocks_same_term_verify_all_postings() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer = MergedIndexBlockWriter::new(
+        let mut writer = SpimiMergeWriter::new(
             file,
             Some(128),
             Some(32),
@@ -336,7 +362,7 @@ mod merged_index_block_writer_tests {
         // Read from all blocks
         for block_id in &metadata.block_ids {
             let mut block = Block::new(*block_id, Some(32));
-            block.init(&mut reader).unwrap();
+            block.decode(&mut reader).unwrap();
 
             let term_index = block.check_if_term_exists(1);
             assert!(term_index >= 0);
@@ -345,6 +371,7 @@ mod merged_index_block_writer_tests {
                 block.decode_chunks_for_term(1, term_index as usize, CompressionAlgorithm::VarByte);
             for chunk in &mut chunks {
                 chunk.decode_doc_ids();
+                chunk.decode_doc_frequencies();
                 for index in 0..chunk.doc_ids.len() {
                     postings_read.push(Posting {
                         doc_id: chunk.doc_ids[index],
@@ -363,7 +390,7 @@ mod merged_index_block_writer_tests {
     fn test_term_without_positions() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer = MergedIndexBlockWriter::new(
+        let mut writer = SpimiMergeWriter::new(
             file,
             Some(64),
             Some(3),
@@ -385,7 +412,7 @@ mod merged_index_block_writer_tests {
 
         let metadata = writer.get_term_metadata(1).unwrap();
         let mut block = Block::new(metadata.block_ids[0], Some(3));
-        block.init(&mut reader).unwrap();
+        block.decode(&mut reader).unwrap();
 
         let chunks = block.decode_chunks_for_term(1, 0, CompressionAlgorithm::VarByte);
         assert_eq!(chunks.len(), 1);
@@ -400,7 +427,7 @@ mod merged_index_block_writer_tests {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
         let mut writer =
-            MergedIndexBlockWriter::new(file, Some(64), None, true, CompressionAlgorithm::VarByte);
+            SpimiMergeWriter::new(file, Some(64), None, true, CompressionAlgorithm::VarByte);
 
         let result = writer.get_term_metadata(999);
         assert!(result.is_none());
@@ -410,7 +437,7 @@ mod merged_index_block_writer_tests {
     fn test_large_posting_list() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer = MergedIndexBlockWriter::new(
+        let mut writer = SpimiMergeWriter::new(
             file,
             Some(128),
             Some(10),
@@ -431,9 +458,10 @@ mod merged_index_block_writer_tests {
 
         let metadata = writer.get_term_metadata(1).unwrap();
         let mut block = Block::new(metadata.block_ids[0], Some(10));
-        block.init(&mut reader).unwrap();
+        block.decode(&mut reader).unwrap();
 
-        let chunks = block.decode_chunks_for_term(1, 0, CompressionAlgorithm::VarByte);
+        let mut chunks = block.decode_chunks_for_term(1, 0, CompressionAlgorithm::VarByte);
+        chunks[0].decode_doc_frequencies();
         let retrieved_positions = chunks[0].get_posting_list(0);
         assert_eq!(retrieved_positions, positions);
     }
@@ -442,7 +470,7 @@ mod merged_index_block_writer_tests {
     fn test_multiple_blocks_multiple_terms_verify_all() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer = MergedIndexBlockWriter::new(
+        let mut writer = SpimiMergeWriter::new(
             file,
             Some(64),
             Some(64),
@@ -475,7 +503,7 @@ mod merged_index_block_writer_tests {
 
         for block_id in &metadata1.block_ids {
             let mut block = Block::new(*block_id, Some(64));
-            block.init(&mut reader).unwrap();
+            block.decode(&mut reader).unwrap();
 
             let term_index = block.check_if_term_exists(1);
             assert!(term_index >= 0);
@@ -485,6 +513,7 @@ mod merged_index_block_writer_tests {
 
             for chunk in &mut chunks {
                 chunk.decode_doc_ids();
+                chunk.decode_doc_frequencies();
                 for doc_id in &chunk.doc_ids {
                     postings1_read.push(doc_id.clone());
                 }
@@ -497,7 +526,7 @@ mod merged_index_block_writer_tests {
 
         for block_id in &metadata2.block_ids {
             let mut block = Block::new(*block_id, Some(64));
-            block.init(&mut reader).unwrap();
+            block.decode(&mut reader).unwrap();
 
             let term_index = block.check_if_term_exists(2);
             assert!(term_index >= 0);
@@ -507,6 +536,7 @@ mod merged_index_block_writer_tests {
 
             for chunk in &mut chunks {
                 chunk.decode_doc_ids();
+                chunk.decode_doc_frequencies();
                 for doc_id in &chunk.doc_ids {
                     postings2_read.push(doc_id.clone());
                 }
@@ -522,7 +552,7 @@ mod merged_index_block_writer_tests {
     fn test_three_terms_spanning_multiple_blocks() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer = MergedIndexBlockWriter::new(
+        let mut writer = SpimiMergeWriter::new(
             file,
             Some(128),
             Some(20),
@@ -569,7 +599,7 @@ mod merged_index_block_writer_tests {
 
             for block_id in &metadata.block_ids {
                 let mut block = Block::new(*block_id, Some(20));
-                block.init(&mut reader).unwrap();
+                block.decode(&mut reader).unwrap();
 
                 let term_index = block.check_if_term_exists(term_id);
                 assert!(term_index >= 0);
@@ -582,6 +612,7 @@ mod merged_index_block_writer_tests {
 
                 for chunk in &mut chunks {
                     chunk.decode_doc_ids();
+                    chunk.decode_doc_frequencies();
                     for index in 0..chunk.doc_ids.len() {
                         postings_read.push(Posting {
                             doc_id: chunk.doc_ids[index],
@@ -600,7 +631,7 @@ mod merged_index_block_writer_tests {
     fn test_interleaved_terms_multiple_blocks() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer = MergedIndexBlockWriter::new(
+        let mut writer = SpimiMergeWriter::new(
             file,
             Some(64),
             Some(64),
@@ -638,7 +669,7 @@ mod merged_index_block_writer_tests {
 
             for block_id in &metadata.block_ids {
                 let mut block = Block::new(*block_id, Some(64));
-                block.init(&mut reader).unwrap();
+                block.decode(&mut reader).unwrap();
 
                 let term_index = block.check_if_term_exists(*term_id);
                 assert!(term_index >= 0);
@@ -651,6 +682,8 @@ mod merged_index_block_writer_tests {
 
                 for chunk in &mut chunks {
                     chunk.decode_doc_ids();
+                    chunk.decode_doc_frequencies();
+
                     for index in 0..chunk.doc_ids.len() {
                         postings_read.push(Posting {
                             doc_id: chunk.doc_ids[index],
@@ -669,7 +702,7 @@ mod merged_index_block_writer_tests {
     fn test_large_and_small_terms_mixed() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer = MergedIndexBlockWriter::new(
+        let mut writer = SpimiMergeWriter::new(
             file,
             Some(64),
             Some(10),
@@ -713,7 +746,7 @@ mod merged_index_block_writer_tests {
         let mut postings2_read = Vec::new();
         for block_id in &metadata2.block_ids {
             let mut block = Block::new(*block_id, Some(10));
-            block.init(&mut reader).unwrap();
+            block.decode(&mut reader).unwrap();
 
             let term_index = block.check_if_term_exists(2);
             assert!(term_index >= 0);
@@ -723,6 +756,7 @@ mod merged_index_block_writer_tests {
 
             for chunk in &mut chunks {
                 chunk.decode_doc_ids();
+                chunk.decode_doc_frequencies();
                 for index in 0..chunk.doc_ids.len() {
                     postings2_read.push(Posting {
                         doc_id: chunk.doc_ids[index],
@@ -740,7 +774,7 @@ mod merged_index_block_writer_tests {
     fn test_varying_position_lengths_multiple_blocks() {
         let temp_file = NamedTempFile::new().unwrap();
         let file = temp_file.reopen().unwrap();
-        let mut writer = MergedIndexBlockWriter::new(
+        let mut writer = SpimiMergeWriter::new(
             file,
             Some(128),
             Some(10),
@@ -763,16 +797,12 @@ mod merged_index_block_writer_tests {
         let mut reader = BufReader::new(&mut file);
 
         let metadata = writer.get_term_metadata(1).unwrap();
-        println!(
-            "Term with varying positions spans {} blocks",
-            metadata.block_ids.len()
-        );
+
         let mut postings_read = Vec::new();
 
         for block_id in &metadata.block_ids {
-            println!("block id {}", block_id);
             let mut block = Block::new(*block_id, Some(10));
-            block.init(&mut reader).unwrap();
+            block.decode(&mut reader).unwrap();
 
             let term_index = block.check_if_term_exists(1);
             assert!(term_index >= 0);
@@ -782,6 +812,7 @@ mod merged_index_block_writer_tests {
 
             for chunk in &mut chunks {
                 chunk.decode_doc_ids();
+                chunk.decode_doc_frequencies();
                 for index in 0..chunk.doc_ids.len() {
                     postings_read.push(Posting {
                         doc_id: chunk.doc_ids[index],
