@@ -8,6 +8,30 @@ pub enum CompressionAlgorithm {
     RiceCoding,
     VarByte,
 }
+
+impl CompressionAlgorithm {
+    pub fn to_byte(&self) -> u8 {
+        match self {
+            CompressionAlgorithm::Simple9 => 0,
+            CompressionAlgorithm::Simple16 => 1,
+            CompressionAlgorithm::PforDelta => 2,
+            CompressionAlgorithm::RiceCoding => 3,
+            CompressionAlgorithm::VarByte => 4,
+        }
+    }
+
+    pub fn from_byte(byte: u8) -> Result<Self, String> {
+        match byte {
+            0 => Ok(CompressionAlgorithm::Simple9),
+            1 => Ok(CompressionAlgorithm::Simple16),
+            2 => Ok(CompressionAlgorithm::PforDelta),
+            3 => Ok(CompressionAlgorithm::RiceCoding),
+            4 => Ok(CompressionAlgorithm::VarByte),
+            _ => Err(format!("Invalid compression algorithm byte: {}", byte)),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Compressor {
     compression_algorithm: CompressionAlgorithm,

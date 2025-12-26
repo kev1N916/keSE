@@ -3,11 +3,7 @@ use std::{
     io::{self, BufReader, Read, Seek},
 };
 
-use crate::{
-    compressor::compressor::CompressionAlgorithm,
-    indexer::helper::{vb_decode_positions, vb_encode_positions},
-    utils::chunk::Chunk,
-};
+use crate::{compressor::compressor::CompressionAlgorithm, utils::chunk::Chunk};
 
 /*
  The unit of storage in our inverted index is a block.
@@ -42,6 +38,7 @@ impl Block {
         }
     }
 
+    // the default block size is 4 as we will always store the no_of_terms as 4 bytes in the block
     pub fn reset(&mut self) {
         self.current_block_size = 4;
         self.no_of_terms = 0;
@@ -65,7 +62,7 @@ impl Block {
     }
 
     // when we add a term we also add the the term offset which is basically the current length of
-    // chunk_bytes,which is where the chunks of the current term will start
+    // chunk_bytes,which is where the chunks of that term will start
     pub fn add_term(&mut self, term: u32) {
         self.current_block_size += 6;
         self.terms.push(term);
@@ -87,6 +84,7 @@ impl Block {
         Some(&chunks[i])
     }
 
+    // since max_block_size is in kb, multiply by 1000
     pub fn space_left(&self) -> u32 {
         self.max_block_size as u32 * 1000 as u32 - self.current_block_size
     }
@@ -116,7 +114,7 @@ impl Block {
         let chunk_bytes = &self.chunk_bytes[term_offset_start..term_off_end];
         let mut chunk_offset = 0;
         let mut current_chunk = Chunk::new(term_id, compression_algorithm);
-        while chunk_offset < chunk_bytes.len() {
+        while chunk_offset + 4 < chunk_bytes.len() {
             let chunk_size = u32::from_le_bytes(
                 chunk_bytes[chunk_offset..chunk_offset + 4]
                     .try_into()
@@ -136,19 +134,13 @@ impl Block {
     }
 
     // We store the no of terms, the terms, the term offsets and then the chunk_bytes
-    pub fn encode(&mut self) -> Vec<u8> {
+    pub fn encode(&mut self, block_bytes: &mut Vec<u8>) {
         assert_eq!(self.term_offsets.len(), self.terms.len());
-        let block_size = self.max_block_size as usize * 1000;
-        let mut block_bytes: Vec<u8> = vec![0; block_size];
+        block_bytes.resize(self.max_block_size as usize * 1000, 0);
         let mut offset = 0;
         block_bytes[offset..offset + 4].copy_from_slice(&(self.terms.len() as u32).to_le_bytes());
         offset += 4;
-
-        // compress the terms and store them
-        let encoded_terms = vb_encode_positions(&self.terms);
-        block_bytes[offset..offset + 4]
-            .copy_from_slice(&(encoded_terms.len() as u32).to_le_bytes());
-        offset += 4;
+        let encoded_terms: Vec<u8> = self.terms.iter().flat_map(|&n| n.to_le_bytes()).collect();
         block_bytes[offset..offset + encoded_terms.len()].copy_from_slice(&encoded_terms);
         offset += encoded_terms.len();
         let encoded_term_offsets: Vec<u8> = self
@@ -160,7 +152,6 @@ impl Block {
             .copy_from_slice(&encoded_term_offsets);
         offset += encoded_term_offsets.len();
         block_bytes[offset..offset + self.chunk_bytes.len()].copy_from_slice(&self.chunk_bytes);
-        block_bytes
     }
 
     pub fn decode(&mut self, reader: &mut BufReader<&mut File>) -> io::Result<()> {
@@ -170,23 +161,22 @@ impl Block {
         ))?;
         let mut block_bytes: Vec<u8> = vec![0; block_size];
         reader.read(&mut block_bytes).unwrap();
-        let no_of_terms_in_block = u32::from_le_bytes(block_bytes[0..4].try_into().unwrap());
-        self.no_of_terms = no_of_terms_in_block;
+        self.no_of_terms = u32::from_le_bytes(block_bytes[0..4].try_into().unwrap());
         let mut offset = 4;
-        let encoded_terms_length =
-            u32::from_le_bytes(block_bytes[offset..offset + 4].try_into().unwrap());
-        offset += 4;
-        self.terms =
-            vb_decode_positions(&block_bytes[offset..offset + encoded_terms_length as usize]);
-        offset += encoded_terms_length as usize;
-        let mut term_offsets: Vec<u16> = Vec::new();
-        for _ in 0..no_of_terms_in_block {
-            let term_offset =
-                u16::from_le_bytes(block_bytes[offset..offset + 2].try_into().unwrap());
-            term_offsets.push(term_offset);
+        self.terms.clear();
+        for _ in 0..self.no_of_terms {
+            self.terms.push(u32::from_le_bytes(
+                block_bytes[offset..offset + 4].try_into().unwrap(),
+            ));
+            offset += 4;
+        }
+        self.term_offsets.clear();
+        for _ in 0..self.no_of_terms {
+            self.term_offsets.push(u16::from_le_bytes(
+                block_bytes[offset..offset + 2].try_into().unwrap(),
+            ));
             offset += 2;
         }
-        self.term_offsets = term_offsets;
         self.chunk_bytes = block_bytes[offset..].to_vec();
         Ok(())
     }

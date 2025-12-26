@@ -145,7 +145,6 @@ impl Spimi {
 
             // The term_frequency is calculated for ranked retrieval
             let term_frequency = final_merged.len() as u32;
-            in_memory_index.set_term_frequency(&term, term_frequency);
 
             // The max_term_score is used for WAND ranked retrieval and needs to be calculated here
             // and stored as metadata
@@ -195,26 +194,44 @@ impl Spimi {
 
             // We add the term to term_id mapping, the max_term_score the and the metadata for
             // block max ranking to the in memory index.
-            in_memory_index.set_term_id(&term, no_of_terms);
-            in_memory_index.set_max_term_score(&term, max_term_score);
-            in_memory_index.set_chunk_block_max_metadata(&term, chunk_metadata);
+            in_memory_index.set_term_id(term, no_of_terms);
+            in_memory_index.set_term_frequency(term_frequency);
+            in_memory_index.set_max_term_score(max_term_score);
+            in_memory_index.set_chunk_block_max_metadata(chunk_metadata);
             // We add the term to the bk_tree as well which helps speed up retrieval
-            in_memory_index.add_term_to_bk_tree(term);
+            // in_memory_index.add_term_to_bk_tree(term);
         }
         // We close the index_merge_writer so that the remaining terms can be written to the disk.
         index_merge_writer.close()?;
 
         // We need to also keep track of the blocks over which the terms spans.
         // This is required during retrieval.
-        for term in in_memory_index.get_all_terms() {
-            let term_id = in_memory_index.get_term_id(&term);
-            if term_id != 0 {
-                if let Some(term_metadata) = index_merge_writer.get_term_metadata(term_id) {
-                    in_memory_index
-                        .set_block_ids(&term, std::mem::take(&mut term_metadata.block_ids));
-                }
+
+        // let terms = in_memory_index.get_all_terms();
+        // for term in terms {
+        //     let term_id = in_memory_index.get_term_id(&term);
+        //     if term_id != 0 {
+        //         if let Some(term_metadata) = index_merge_writer.get_term_metadata(term_id) {
+        //             in_memory_index
+        //                 .set_block_ids(&term, std::mem::take(&mut term_metadata.block_ids));
+        //         }
+        //     }
+        // }
+
+        for term_id in 1..=no_of_terms {
+            if let Some(term_metadata) = index_merge_writer.get_term_metadata(term_id) {
+                in_memory_index.set_block_ids(std::mem::take(&mut term_metadata.block_ids));
             }
         }
+        // for term in in_memory_index.get_all_terms() {
+        //     let term_id = in_memory_index.get_term_id(&term);
+        //     if term_id != 0 {
+        //         if let Some(term_metadata) = index_merge_writer.get_term_metadata(term_id) {
+        //             in_memory_index
+        //                 .set_block_ids(&term, std::mem::take(&mut term_metadata.block_ids));
+        //         }
+        //     }
+        // }
 
         // We keep track of total no of blocks and total no of terms
         in_memory_index.no_of_blocks = index_merge_writer.current_block_no;

@@ -90,16 +90,16 @@ impl QueryProcessor {
     pub fn process_query(
         &mut self,
         query_terms: Vec<String>,
-        query_metadata: Vec<&InMemoryTermMetadata>,
+        query_metadata: Vec<InMemoryTermMetadata>,
         document_lengths: &Vec<u32>,
         average_document_length: f32,
     ) -> Vec<u32> {
-        let mut term_iterators: Vec<TermIterator> = Vec::new();
+        let mut term_iterators: Vec<TermIterator> = Vec::with_capacity(query_terms.len());
         let mut reader: BufReader<&mut File> = BufReader::new(&mut self.inverted_index_file);
 
         for i in 0..query_metadata.len() {
             let mut chunks = Vec::new();
-            for block_id in &query_metadata[i].block_ids {
+            for block_id in query_metadata[i].block_ids {
                 if let Some(block) = self.block_cache.get(block_id) {
                     let term_index = block.check_if_term_exists(query_metadata[i].term_id);
 
@@ -134,7 +134,7 @@ impl QueryProcessor {
                 query_metadata[i].term_frequency,
                 chunks,
                 query_metadata[i].max_score,
-                query_metadata[i].chunk_block_max_metadata.clone(),
+                query_metadata[i].chunk_block_max_metadata.unwrap().to_vec(),
             ));
         }
         for term_iterator in &mut term_iterators {

@@ -1,6 +1,6 @@
 use std::{
-    fs::{self},
-    io::{self, Error, ErrorKind},
+    fs::{self, File},
+    io::{self, BufWriter, Error, ErrorKind, Write},
     path::Path,
 };
 
@@ -72,6 +72,24 @@ impl SearchEngine {
         Ok(())
     }
 
+    // pub fn save_index(&mut self) -> io::Result<()> {
+    //     let save_path = Path::new(&self.result_directory_path).join("index_save.sidx");
+    //     let file = File::create(save_path.as_path()).unwrap();
+    //     let mut writer = BufWriter::new(file);
+    //     let indexer_metadata = self.indexer.encode_metadata();
+    //     let in_memory_metadata = self.in_memory_index.encode();
+    //     writer
+    //         .write(&(in_memory_metadata.len() as u32).to_le_bytes())
+    //         .unwrap();
+    //     writer.write(&in_memory_metadata).unwrap();
+    //     writer
+    //         .write(&(indexer_metadata.len() as u32).to_le_bytes())
+    //         .unwrap();
+    //     writer.write(&indexer_metadata).unwrap();
+    //     writer.flush().unwrap();
+    //     Ok(())
+    // }
+
     pub fn set_index_directory_path(&mut self, index_directory_path: String) {
         self.index_directory_path = index_directory_path;
     }
@@ -103,11 +121,13 @@ impl SearchEngine {
             }
 
             let tokens = token_query_result.unwrap();
-            let mut query_terms = Vec::new();
-            let mut query_metadata = Vec::new();
+            let mut query_terms = Vec::with_capacity(tokens.unigram.len());
+            let mut query_metadata = Vec::with_capacity(tokens.unigram.len());
             for token in tokens.unigram {
-                query_metadata.push(self.in_memory_index.get_term_metadata(&token.word));
-                query_terms.push(token.word);
+                if let Some(term_metadata) = self.in_memory_index.get_term_metadata(&token.word) {
+                    query_metadata.push(term_metadata);
+                    query_terms.push(token.word);
+                }
             }
 
             let result_docs = self.query_processor.process_query(

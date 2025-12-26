@@ -67,7 +67,6 @@ impl Dictionary {
             let posting_length = posting.positions.len() as u32;
             postings_list.push(posting);
             self.current_size += 4 + 4 * posting_length + 4;
-            // postings_list.shrink_to_fit();
         }
     }
 }

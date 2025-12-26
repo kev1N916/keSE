@@ -12,7 +12,7 @@ use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
-    io::{self, BufReader},
+    io::{self, BufReader, Cursor, Read},
     path::Path,
     sync::{
         Arc, Mutex,
@@ -97,6 +97,119 @@ impl Indexer {
         self.doc_id
     }
 
+    pub fn encode_metadata(&self) -> Vec<u8> {
+        let mut buffer = Vec::new();
+
+        // Write avg_doc_length (4 bytes)
+        buffer.extend_from_slice(&self.avg_doc_length.to_le_bytes());
+
+        // Write doc_id (4 bytes)
+        buffer.extend_from_slice(&self.doc_id.to_le_bytes());
+
+        // Write number of documents (4 bytes)
+        buffer.extend_from_slice(&(self.document_lengths.len() as u32).to_le_bytes());
+
+        // Write each document's data consecutively
+        for i in 0..self.document_lengths.len() {
+            let document_length = &self.document_lengths[i];
+            let document_name = &self.document_names[i];
+            let document_url = &self.document_urls[i];
+
+            // Write document_length (4 bytes)
+            buffer.extend_from_slice(&document_length.to_le_bytes());
+
+            // Write document_name length and bytes
+            let name_bytes = document_name.as_bytes();
+            buffer.extend_from_slice(&(name_bytes.len() as u32).to_le_bytes());
+            buffer.extend_from_slice(name_bytes);
+
+            // Write document_url length and bytes
+            let url_bytes = document_url.as_bytes();
+            buffer.extend_from_slice(&(url_bytes.len() as u32).to_le_bytes());
+            buffer.extend_from_slice(url_bytes);
+        }
+
+        buffer
+    }
+
+    pub fn decode_metadata(
+        bytes: &[u8],
+    ) -> Result<
+        (
+            f32,
+            u32,
+            CompressionAlgorithm,
+            Vec<u32>,
+            Vec<String>,
+            Vec<String>,
+        ),
+        String,
+    > {
+        let mut cursor = std::io::Cursor::new(bytes);
+        use std::io::Read;
+
+        // Read avg_doc_length (4 bytes)
+        let mut buf = [0u8; 4];
+        cursor.read_exact(&mut buf).map_err(|e| e.to_string())?;
+        let avg_doc_length = f32::from_le_bytes(buf);
+
+        // Read doc_id (4 bytes)
+        cursor.read_exact(&mut buf).map_err(|e| e.to_string())?;
+        let doc_id = u32::from_le_bytes(buf);
+
+        // Read compression algorithm (1 byte)
+        let mut algo_byte = [0u8; 1];
+        cursor
+            .read_exact(&mut algo_byte)
+            .map_err(|e| e.to_string())?;
+        let compression_algorithm = CompressionAlgorithm::from_byte(algo_byte[0])?;
+
+        // Read number of documents (4 bytes)
+        cursor.read_exact(&mut buf).map_err(|e| e.to_string())?;
+        let num_documents = u32::from_le_bytes(buf) as usize;
+
+        // Pre-allocate vectors
+        let mut document_lengths = Vec::with_capacity(num_documents);
+        let mut document_names = Vec::with_capacity(num_documents);
+        let mut document_urls = Vec::with_capacity(num_documents);
+
+        // Read each document's data consecutively
+        for _ in 0..num_documents {
+            // Read document_length (4 bytes)
+            cursor.read_exact(&mut buf).map_err(|e| e.to_string())?;
+            let document_length = u32::from_le_bytes(buf);
+            document_lengths.push(document_length);
+
+            // Read document_name
+            cursor.read_exact(&mut buf).map_err(|e| e.to_string())?;
+            let name_len = u32::from_le_bytes(buf) as usize;
+            let mut name_bytes = vec![0u8; name_len];
+            cursor
+                .read_exact(&mut name_bytes)
+                .map_err(|e| e.to_string())?;
+            let document_name = String::from_utf8(name_bytes).map_err(|e| e.to_string())?;
+            document_names.push(document_name);
+
+            // Read document_url
+            cursor.read_exact(&mut buf).map_err(|e| e.to_string())?;
+            let url_len = u32::from_le_bytes(buf) as usize;
+            let mut url_bytes = vec![0u8; url_len];
+            cursor
+                .read_exact(&mut url_bytes)
+                .map_err(|e| e.to_string())?;
+            let document_url = String::from_utf8(url_bytes).map_err(|e| e.to_string())?;
+            document_urls.push(document_url);
+        }
+
+        Ok((
+            avg_doc_length,
+            doc_id,
+            compression_algorithm,
+            document_lengths,
+            document_names,
+            document_urls,
+        ))
+    }
     fn read_zstd_file(
         path: &Path,
         tx: &mpsc::SyncSender<Vec<Term>>,
@@ -179,6 +292,15 @@ impl Indexer {
         tx.send(terms).unwrap();
 
         Ok(())
+    }
+
+    pub fn save(&self) {
+        assert_eq!(self.document_lengths.len(), self.document_names.len());
+        assert_eq!(self.document_lengths.len(), self.document_urls.len());
+
+        let save_path = Path::new(&self.result_directory_path).join("index_save.sidx");
+        let file = File::create(save_path.as_path()).unwrap();
+        for i in 0..self.document_lengths.len() {}
     }
 
     fn process_directory(
@@ -373,16 +495,15 @@ mod tests {
     fn test_spimi_index() {
         let query_parser = SearchTokenizer::new().unwrap();
         // let temp_dir = TempDir::new().unwrap();
-        let result_path = "index_run_2".to_string();
+        let result_path = "index_run_3".to_string();
         let path = Path::new(&result_path);
         if !path.exists() {
             fs::create_dir_all(path).unwrap();
         } else if path.is_file() {
-            fs::remove_file(path).unwrap();
             fs::create_dir_all(path).unwrap();
         }
         let mut indexer =
-            Indexer::new(query_parser, CompressionAlgorithm::VarByte, result_path).unwrap();
+            Indexer::new(query_parser, CompressionAlgorithm::Simple16, result_path).unwrap();
         let index_directory_path =
             Path::new("enwiki-20171001-pages-meta-current-withlinks-processed");
         indexer.set_index_directory_path(index_directory_path.to_str().unwrap().to_string());
@@ -391,7 +512,7 @@ mod tests {
 
     #[test]
     fn test_spimi_merge() {
-        let mut spimi = Spimi::new("index_run_2".to_string());
+        let mut spimi = Spimi::new("index_run_3".to_string());
         spimi
             .merge_spimi_index_files(
                 300.0,

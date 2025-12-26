@@ -41,6 +41,7 @@ pub struct SpimiMergeWriter {
     file_writer: BufWriter<File>,
     compression_algorithm: CompressionAlgorithm, // the compression algorithm which is going to be used for the chunks
     pub chunk_size: u8,                          // maximum number of postings in a single chunk
+    block_buffer: Vec<u8>,
 }
 
 impl SpimiMergeWriter {
@@ -57,6 +58,7 @@ impl SpimiMergeWriter {
             current_block_no: 0,
             current_block: Block::new(0, block_size),
             include_positions,
+            block_buffer: vec![0; 64000],
             file_writer: BufWriter::new(file),
             compression_algorithm,
             chunk_size: chunk_size.unwrap_or(128),
@@ -64,8 +66,8 @@ impl SpimiMergeWriter {
     }
 
     pub fn finish(&mut self) -> io::Result<()> {
-        self.buffered_block_bytes
-            .extend(self.current_block.encode());
+        self.current_block.encode(&mut self.block_buffer);
+        self.buffered_block_bytes.append(&mut self.block_buffer);
         self.file_writer.write_all(&self.buffered_block_bytes)?;
         self.flush()?;
         self.current_block_no += 1;
@@ -168,8 +170,8 @@ impl SpimiMergeWriter {
     }
 
     fn write_block_to_index_file(&mut self) -> io::Result<()> {
-        self.buffered_block_bytes
-            .extend(self.current_block.encode());
+        self.current_block.encode(&mut self.block_buffer);
+        self.buffered_block_bytes.append(&mut self.block_buffer);
         if self.buffered_block_bytes.len() >= 3_000_000 {
             self.file_writer.write_all(&self.buffered_block_bytes)?;
             self.flush()?;
