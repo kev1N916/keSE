@@ -228,21 +228,14 @@ impl Spimi {
         dict: &Dictionary,
     ) -> Result<(), std::io::Error> {
         if dict.no_of_terms > 0 {
-            let current_time = SystemTime::now();
             let file = File::create(filename)?;
             let mut writer = BufWriter::new(file);
-            println!("no of terms {}", dict.no_of_terms);
             writer.write_all(&(dict.no_of_terms).to_le_bytes())?;
-            for (key, value) in &dict.dictionary {
+            for (key, value) in &dict.dictionary{
                 self.write_term_to_disk(&mut writer, key, value)?;
             }
             writer.flush()?;
-            let now_time = SystemTime::now();
-            println!(
-                "time taken to complete writing the disk{:?}",
-                now_time.duration_since(current_time).unwrap()
-            );
-        }
+        } 
         Ok(())
     }
 

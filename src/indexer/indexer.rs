@@ -450,7 +450,7 @@ mod tests {
     }
 
     #[test]
-    fn test_save_index() {
+    fn test_save_document_metadata() {
         let query_parser = SearchTokenizer::new().unwrap();
         // let temp_dir = TempDir::new().unwrap();
         let result_path = "index_run_2".to_string();
@@ -460,16 +460,24 @@ mod tests {
         } else if path.is_file() {
             fs::create_dir_all(path).unwrap();
         }
-        let mut indexer =
-            Indexer::new(query_parser, CompressionAlgorithm::Simple16, result_path).unwrap();
+        let mut indexer = Indexer::new(
+            query_parser,
+            CompressionAlgorithm::Simple16,
+            result_path.clone(),
+        )
+        .unwrap();
         let index_directory_path = Path::new("wikipedia");
         indexer.set_index_directory_path(index_directory_path.to_str().unwrap().to_string());
         indexer.start_spimi().unwrap();
-        indexer.save_document_metadata().unwrap();
+
+        let doc_save_path = path.join("document_metadata.sidx");
+        let file = File::create(&doc_save_path.as_path()).unwrap();
+        let term_writer = BufWriter::new(file);
+        indexer.save_document_metadata(term_writer).unwrap();
     }
 
     #[test]
-    fn test_load_index() {
+    fn test_load_document_metadata() {
         let query_parser = SearchTokenizer::new().unwrap();
         // let temp_dir = TempDir::new().unwrap();
         let result_path = "index_run_2".to_string();
@@ -479,11 +487,20 @@ mod tests {
         } else if path.is_file() {
             fs::create_dir_all(path).unwrap();
         }
-        let mut indexer =
-            Indexer::new(query_parser, CompressionAlgorithm::Simple16, result_path).unwrap();
+        let mut indexer = Indexer::new(
+            query_parser,
+            CompressionAlgorithm::Simple16,
+            result_path.clone(),
+        )
+        .unwrap();
         let index_directory_path = Path::new("wikipedia");
         indexer.set_index_directory_path(index_directory_path.to_str().unwrap().to_string());
-        indexer.load().unwrap();
+
+        let doc_save_path = path.join("document_metadata.sidx");
+        let file = File::open(&doc_save_path.as_path()).unwrap();
+        let term_writer = BufReader::new(file);
+
+        indexer.load_document_metadata(term_writer).unwrap();
 
         println!("{} {}", indexer.doc_id, indexer.document_lengths.len());
 
