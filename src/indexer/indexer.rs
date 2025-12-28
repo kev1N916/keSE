@@ -1,6 +1,6 @@
 use crate::{
     compressor::compressor::CompressionAlgorithm,
-    in_memory_index::in_memory_index::InMemoryIndex,
+    in_memory_index_metadata::in_memory_index_metadata::InMemoryIndexMetadata,
     indexer::spimi::spimi::Spimi,
     query_parser::tokenizer::SearchTokenizer,
     utils::{posting::Posting, term::Term},
@@ -12,7 +12,7 @@ use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
-    io::{self, BufReader, Cursor, Read},
+    io::{self, BufReader, BufWriter, Cursor, Read, Write},
     path::Path,
     sync::{
         Arc, Mutex,
@@ -24,7 +24,6 @@ use std::{
 };
 use zstd::stream::read::Decoder;
 
-// Define the structure matching your JSON format
 #[derive(Debug, Deserialize, Serialize)]
 struct WikiArticle {
     url: String,
@@ -40,6 +39,9 @@ pub struct DocumentMetadata {
     pub doc_length: u32,
 }
 
+// The Indexer is responsible for performing the single-pass-in-memory-indexing
+// It also contains metadata regarding the documents as well as the terms which is
+// needed to answer queries.
 pub struct Indexer {
     pub avg_doc_length: f32,
     doc_id: u32,
@@ -97,119 +99,6 @@ impl Indexer {
         self.doc_id
     }
 
-    pub fn encode_metadata(&self) -> Vec<u8> {
-        let mut buffer = Vec::new();
-
-        // Write avg_doc_length (4 bytes)
-        buffer.extend_from_slice(&self.avg_doc_length.to_le_bytes());
-
-        // Write doc_id (4 bytes)
-        buffer.extend_from_slice(&self.doc_id.to_le_bytes());
-
-        // Write number of documents (4 bytes)
-        buffer.extend_from_slice(&(self.document_lengths.len() as u32).to_le_bytes());
-
-        // Write each document's data consecutively
-        for i in 0..self.document_lengths.len() {
-            let document_length = &self.document_lengths[i];
-            let document_name = &self.document_names[i];
-            let document_url = &self.document_urls[i];
-
-            // Write document_length (4 bytes)
-            buffer.extend_from_slice(&document_length.to_le_bytes());
-
-            // Write document_name length and bytes
-            let name_bytes = document_name.as_bytes();
-            buffer.extend_from_slice(&(name_bytes.len() as u32).to_le_bytes());
-            buffer.extend_from_slice(name_bytes);
-
-            // Write document_url length and bytes
-            let url_bytes = document_url.as_bytes();
-            buffer.extend_from_slice(&(url_bytes.len() as u32).to_le_bytes());
-            buffer.extend_from_slice(url_bytes);
-        }
-
-        buffer
-    }
-
-    pub fn decode_metadata(
-        bytes: &[u8],
-    ) -> Result<
-        (
-            f32,
-            u32,
-            CompressionAlgorithm,
-            Vec<u32>,
-            Vec<String>,
-            Vec<String>,
-        ),
-        String,
-    > {
-        let mut cursor = std::io::Cursor::new(bytes);
-        use std::io::Read;
-
-        // Read avg_doc_length (4 bytes)
-        let mut buf = [0u8; 4];
-        cursor.read_exact(&mut buf).map_err(|e| e.to_string())?;
-        let avg_doc_length = f32::from_le_bytes(buf);
-
-        // Read doc_id (4 bytes)
-        cursor.read_exact(&mut buf).map_err(|e| e.to_string())?;
-        let doc_id = u32::from_le_bytes(buf);
-
-        // Read compression algorithm (1 byte)
-        let mut algo_byte = [0u8; 1];
-        cursor
-            .read_exact(&mut algo_byte)
-            .map_err(|e| e.to_string())?;
-        let compression_algorithm = CompressionAlgorithm::from_byte(algo_byte[0])?;
-
-        // Read number of documents (4 bytes)
-        cursor.read_exact(&mut buf).map_err(|e| e.to_string())?;
-        let num_documents = u32::from_le_bytes(buf) as usize;
-
-        // Pre-allocate vectors
-        let mut document_lengths = Vec::with_capacity(num_documents);
-        let mut document_names = Vec::with_capacity(num_documents);
-        let mut document_urls = Vec::with_capacity(num_documents);
-
-        // Read each document's data consecutively
-        for _ in 0..num_documents {
-            // Read document_length (4 bytes)
-            cursor.read_exact(&mut buf).map_err(|e| e.to_string())?;
-            let document_length = u32::from_le_bytes(buf);
-            document_lengths.push(document_length);
-
-            // Read document_name
-            cursor.read_exact(&mut buf).map_err(|e| e.to_string())?;
-            let name_len = u32::from_le_bytes(buf) as usize;
-            let mut name_bytes = vec![0u8; name_len];
-            cursor
-                .read_exact(&mut name_bytes)
-                .map_err(|e| e.to_string())?;
-            let document_name = String::from_utf8(name_bytes).map_err(|e| e.to_string())?;
-            document_names.push(document_name);
-
-            // Read document_url
-            cursor.read_exact(&mut buf).map_err(|e| e.to_string())?;
-            let url_len = u32::from_le_bytes(buf) as usize;
-            let mut url_bytes = vec![0u8; url_len];
-            cursor
-                .read_exact(&mut url_bytes)
-                .map_err(|e| e.to_string())?;
-            let document_url = String::from_utf8(url_bytes).map_err(|e| e.to_string())?;
-            document_urls.push(document_url);
-        }
-
-        Ok((
-            avg_doc_length,
-            doc_id,
-            compression_algorithm,
-            document_lengths,
-            document_names,
-            document_urls,
-        ))
-    }
     fn read_zstd_file(
         path: &Path,
         tx: &mpsc::SyncSender<Vec<Term>>,
@@ -229,14 +118,13 @@ impl Indexer {
         let mut local_lengths = Vec::with_capacity(400);
         let mut local_names = Vec::with_capacity(400);
         let mut local_urls = Vec::with_capacity(400);
-        let mut local_doc_index = 0u32; // Track local doc index for this file
+        let mut local_doc_index = 0u32;
         for result in stream {
             match result {
                 Ok(article) => {
                     let mut doc_postings: FxHashMap<&str, Vec<u32>> =
                         FxHashMap::with_capacity_and_hasher(400, Default::default());
 
-                    // unsafe {
                     let plain_text = extract_plaintext(&article.text);
                     let tokens = search_tokenizer.tokenize(&plain_text);
 
@@ -249,8 +137,6 @@ impl Indexer {
                             .or_insert_with(Vec::new)
                             .push(token.position);
                     }
-
-                    // Drain to avoid another clone
                     for (key, value) in doc_postings.drain() {
                         let term = Term {
                             posting: Posting {
@@ -269,13 +155,11 @@ impl Indexer {
             }
         }
 
-        // Now acquire locks ONCE and push everything
         let start_doc_id = {
             let mut lengths = doc_lengths.lock().unwrap();
             let mut names = doc_names.lock().unwrap();
             let mut urls = doc_urls.lock().unwrap();
 
-            // Reserve doc_id range atomically
             let start_id = doc_id.fetch_add(local_lengths.len() as u32, Ordering::SeqCst);
 
             lengths.append(&mut local_lengths);
@@ -283,7 +167,7 @@ impl Indexer {
             urls.append(&mut local_urls);
 
             start_id
-        }; // Locks released here
+        };
 
         for term in &mut terms {
             term.posting.doc_id = start_doc_id + term.posting.doc_id + 1;
@@ -294,13 +178,60 @@ impl Indexer {
         Ok(())
     }
 
-    pub fn save(&self) {
+    pub fn save_document_metadata<W: Write>(&self, mut writer: W) -> io::Result<()> {
         assert_eq!(self.document_lengths.len(), self.document_names.len());
         assert_eq!(self.document_lengths.len(), self.document_urls.len());
+        assert_eq!(self.document_lengths.len() as u32, self.doc_id);
 
-        let save_path = Path::new(&self.result_directory_path).join("index_save.sidx");
-        let file = File::create(save_path.as_path()).unwrap();
-        for i in 0..self.document_lengths.len() {}
+        writer.write_all(&self.doc_id.to_le_bytes())?;
+        writer.write_all(&self.avg_doc_length.to_le_bytes())?;
+
+        for i in 0..self.document_lengths.len() {
+            let name_bytes = self.document_names[i].as_bytes();
+            writer.write_all(&((name_bytes.len() as u32).to_le_bytes()))?;
+            writer.write_all(name_bytes)?;
+            let url_bytes = self.document_urls[i].as_bytes();
+            writer.write_all(&((url_bytes.len() as u32).to_le_bytes()))?;
+            writer.write_all(url_bytes)?;
+            writer.write_all(&self.document_lengths[i].to_le_bytes())?;
+        }
+
+        writer.flush()?;
+        Ok(())
+    }
+
+    pub fn load_document_metadata<R: Read>(&mut self, mut reader: R) -> io::Result<()> {
+        let mut buffer: [u8; 4] = [0; 4];
+        reader.read_exact(&mut buffer)?;
+        self.doc_id = u32::from_le_bytes(buffer);
+
+        reader.read_exact(&mut buffer)?;
+        self.avg_doc_length = f32::from_le_bytes(buffer);
+
+        self.document_lengths.reserve(self.doc_id as usize);
+        self.document_names.reserve(self.doc_id as usize);
+        self.document_urls.reserve(self.doc_id as usize);
+
+        for _ in 0..self.doc_id {
+            reader.read_exact(&mut buffer)?;
+            let name_length = u32::from_le_bytes(buffer) as usize;
+            let mut name_buffer: Vec<u8> = vec![0; name_length];
+            reader.read_exact(&mut name_buffer)?;
+            self.document_names
+                .push(String::from_utf8(name_buffer).unwrap());
+
+            reader.read_exact(&mut buffer)?;
+            let url_length = u32::from_le_bytes(buffer) as usize;
+            let mut url_buffer: Vec<u8> = vec![0; url_length];
+            reader.read_exact(&mut url_buffer)?;
+            self.document_urls
+                .push(String::from_utf8(url_buffer).unwrap());
+
+            reader.read_exact(&mut buffer)?;
+            self.document_lengths.push(u32::from_le_bytes(buffer));
+        }
+
+        Ok(())
     }
 
     fn process_directory(
@@ -338,6 +269,7 @@ impl Indexer {
     }
 
     pub fn set_index_directory_path(&mut self, index_directory_path: String) {
+        println!("sdaasdasdda hwywy");
         self.index_directory_path = index_directory_path;
     }
 
@@ -353,12 +285,17 @@ impl Indexer {
         self.result_directory_path.clone()
     }
 
-    pub fn index(&mut self) -> io::Result<InMemoryIndex> {
-        self.spimi().unwrap();
+    // we create the temporary index files through start_spimi
+    // and then merge them
+    pub fn index(&mut self) -> io::Result<InMemoryIndexMetadata> {
+        self.start_spimi().unwrap();
         self.merge_spimi_files()
     }
-    fn spimi(&mut self) -> io::Result<()> {
-        let (tx, rx) = mpsc::sync_channel::<Vec<Term>>(10); // Only buffer 5 batches
+
+    // Starts the spmi function in another thread and then starts processing the directory
+    // which we need to index
+    fn start_spimi(&mut self) -> io::Result<()> {
+        let (tx, rx) = mpsc::sync_channel::<Vec<Term>>(10);
         let files: Vec<_> = std::fs::read_dir(self.get_index_directory_path())
             .unwrap()
             .filter_map(|e| e.ok())
@@ -366,13 +303,17 @@ impl Indexer {
             .collect();
 
         let estimated_docs = 6_000_000;
-        let doc_id = Arc::new(AtomicU32::new(0));
 
+        // We use an instance of doc_id which is passed to the indexing threads
+        // This currently makes it faster
+        let doc_id = Arc::new(AtomicU32::new(0));
+        // The doc metadata in the form of arrays is also passed to the threads
         let doc_lengths = Arc::new(Mutex::new(Vec::with_capacity(estimated_docs)));
         let doc_names = Arc::new(Mutex::new(Vec::with_capacity(estimated_docs)));
         let doc_urls = Arc::new(Mutex::new(Vec::with_capacity(estimated_docs)));
 
         let mut spmi = Spimi::new(self.get_result_directory_path());
+        // the spimi function is started
         let handle = thread::spawn(move || {
             spmi.single_pass_in_memory_indexing(rx).unwrap();
         });
@@ -381,6 +322,7 @@ impl Indexer {
         let chunk_size = (files.len() + num_threads - 1) / num_threads;
         let current_time = SystemTime::now();
 
+        // the files are divided based on the number of threads
         let handles: Vec<_> = files
             .chunks(chunk_size)
             .map(|chunk| {
@@ -433,16 +375,12 @@ impl Indexer {
         let mut names = Arc::try_unwrap(doc_names).unwrap().into_inner().unwrap();
         let mut urls = Arc::try_unwrap(doc_urls).unwrap().into_inner().unwrap();
 
+        lengths.shrink_to_fit();
+        names.shrink_to_fit();
+        urls.shrink_to_fit();
         lengths.truncate(final_doc_count);
         names.truncate(final_doc_count);
         urls.truncate(final_doc_count);
-        // let article_metadata = Arc::try_unwrap(article_metadata)
-        //     .unwrap()
-        //     .into_inner()
-        //     .unwrap();
-        // self.document_lengths = article_metadata.doc_length;
-        // self.document_names = article_metadata.doc_names;
-        // self.document_urls = article_metadata.doc_urls;
 
         self.document_lengths = lengths;
         self.document_names = names;
@@ -450,6 +388,8 @@ impl Indexer {
 
         self.doc_id = final_doc_count as u32;
 
+        // the average length of the documents is calculated as
+        // it is needed during the processing of queries
         let mut doc_avg = 0;
         for doc_length in &self.document_lengths {
             doc_avg += doc_length
@@ -458,7 +398,7 @@ impl Indexer {
         Ok(())
     }
 
-    fn merge_spimi_files(&mut self) -> io::Result<InMemoryIndex> {
+    pub fn merge_spimi_files(&mut self) -> io::Result<InMemoryIndexMetadata> {
         let mut spmi = Spimi::new(self.get_result_directory_path());
         let result = spmi
             .merge_spimi_index_files(
@@ -492,10 +432,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_spimi_index() {
+    fn test_start_spimi() {
         let query_parser = SearchTokenizer::new().unwrap();
         // let temp_dir = TempDir::new().unwrap();
-        let result_path = "index_run_3".to_string();
+        let result_path = "index_run_2".to_string();
         let path = Path::new(&result_path);
         if !path.exists() {
             fs::create_dir_all(path).unwrap();
@@ -504,21 +444,66 @@ mod tests {
         }
         let mut indexer =
             Indexer::new(query_parser, CompressionAlgorithm::Simple16, result_path).unwrap();
-        let index_directory_path =
-            Path::new("enwiki-20171001-pages-meta-current-withlinks-processed");
+        let index_directory_path = Path::new("wikipedia");
         indexer.set_index_directory_path(index_directory_path.to_str().unwrap().to_string());
-        indexer.spimi().unwrap();
+        indexer.start_spimi().unwrap();
+    }
+
+    #[test]
+    fn test_save_index() {
+        let query_parser = SearchTokenizer::new().unwrap();
+        // let temp_dir = TempDir::new().unwrap();
+        let result_path = "index_run_2".to_string();
+        let path = Path::new(&result_path);
+        if !path.exists() {
+            fs::create_dir_all(path).unwrap();
+        } else if path.is_file() {
+            fs::create_dir_all(path).unwrap();
+        }
+        let mut indexer =
+            Indexer::new(query_parser, CompressionAlgorithm::Simple16, result_path).unwrap();
+        let index_directory_path = Path::new("wikipedia");
+        indexer.set_index_directory_path(index_directory_path.to_str().unwrap().to_string());
+        indexer.start_spimi().unwrap();
+        indexer.save_document_metadata().unwrap();
+    }
+
+    #[test]
+    fn test_load_index() {
+        let query_parser = SearchTokenizer::new().unwrap();
+        // let temp_dir = TempDir::new().unwrap();
+        let result_path = "index_run_2".to_string();
+        let path = Path::new(&result_path);
+        if !path.exists() {
+            fs::create_dir_all(path).unwrap();
+        } else if path.is_file() {
+            fs::create_dir_all(path).unwrap();
+        }
+        let mut indexer =
+            Indexer::new(query_parser, CompressionAlgorithm::Simple16, result_path).unwrap();
+        let index_directory_path = Path::new("wikipedia");
+        indexer.set_index_directory_path(index_directory_path.to_str().unwrap().to_string());
+        indexer.load().unwrap();
+
+        println!("{} {}", indexer.doc_id, indexer.document_lengths.len());
+
+        for i in 0..indexer.doc_id as usize {
+            println!(
+                "{} {} {}",
+                indexer.document_lengths[i], indexer.document_names[i], indexer.document_urls[i]
+            );
+        }
     }
 
     #[test]
     fn test_spimi_merge() {
-        let mut spimi = Spimi::new("index_run_3".to_string());
+        let mut spimi = Spimi::new("index_run_2".to_string());
         spimi
             .merge_spimi_index_files(
                 300.0,
                 false,
                 &Vec::new(),
-                CompressionAlgorithm::VarByte,
+                CompressionAlgorithm::PforDelta,
                 128,
             )
             .unwrap();

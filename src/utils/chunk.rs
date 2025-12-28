@@ -1,13 +1,20 @@
 use crate::compressor::compressor::{CompressionAlgorithm, Compressor};
 
+// The Chunk is a unit of storage for a posting list
+// Each posting list is divided into chunks.
+// The maximum size of a chunk is 128 postings.
+// When we store the chunk on disk, we store the chunk size in bytes,
+// the no of postings in this chunk(it may have less than 128 postings), the max document id
+// stored in the chunk and then the compressed doc_ids, the compressed frequenices
+// and then the compressed positions if we are choosing to store positions.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Chunk {
-    pub size_of_chunk: u32,                  // stored on disk
-    pub max_doc_id: u32,                     // stored on disk
-    pub no_of_postings: u8,                  // stored on disk
-    pub compressed_doc_ids: Vec<u8>,         // stored on disk
-    pub compressed_doc_frequencies: Vec<u8>, // stored on disk
-    pub compressed_doc_positions: Vec<u8>,   // stored on disk
+    pub size_of_chunk: u32,
+    pub max_doc_id: u32,
+    pub no_of_postings: u8,
+    pub compressed_doc_ids: Vec<u8>,
+    pub compressed_doc_frequencies: Vec<u8>,
+    pub compressed_doc_positions: Vec<u8>,
     pub indexed_compressed_positions: Vec<Vec<u8>>,
     pub compressor: Compressor,
     pub p_for_delta_compressor: Compressor,
@@ -15,16 +22,16 @@ pub struct Chunk {
     pub doc_positions: Vec<Vec<u32>>,
     pub doc_frequencies: Vec<u32>,
     pub term: u32,
-    pub last_doc_id: u32,
 }
 
 impl Chunk {
     pub fn new(term: u32, compression_algorithm: CompressionAlgorithm) -> Self {
         Self {
+            // the default size of the chunk is 9
+            // ( 4 for the max_doc_id and size_of_chunk and 1 byte for no_of_postings)
             size_of_chunk: 9,
             max_doc_id: 0,
             no_of_postings: 0,
-            last_doc_id: 0,
             compressed_doc_ids: Vec::new(),
             compressed_doc_positions: Vec::new(),
             compressed_doc_frequencies: Vec::new(),
@@ -40,7 +47,6 @@ impl Chunk {
 
     pub fn reset(&mut self) {
         self.size_of_chunk = 9;
-        self.last_doc_id = 0;
         self.max_doc_id = 0;
         self.doc_positions.clear();
         self.doc_frequencies.clear();
@@ -117,6 +123,8 @@ impl Chunk {
         }
     }
 
+    // we divide the compressed_doc_positions into individual compressed segments
+    // so that retrieval of these segments is easier
     pub fn index_positions(&mut self) {
         if self.compressed_doc_positions.len() == 0 {
             return;
@@ -134,12 +142,14 @@ impl Chunk {
                 .push(self.compressed_doc_positions[offset..offset + positions_length].to_vec());
             offset += positions_length;
         }
+        self.indexed_compressed_positions.shrink_to_fit();
         self.compressed_doc_positions.clear();
     }
 
     pub fn add_doc_id(&mut self, doc_id: u32) {
         self.doc_ids.push(doc_id);
         self.set_max_doc_id(doc_id);
+        self.no_of_postings += 1;
     }
 
     pub fn add_doc_positions(&mut self, positions: Vec<u32>) {
@@ -230,7 +240,6 @@ mod tests {
         assert_eq!(chunk.size_of_chunk, 9);
         assert_eq!(chunk.max_doc_id, 0);
         assert_eq!(chunk.no_of_postings, 0);
-        assert_eq!(chunk.last_doc_id, 0);
         assert!(chunk.doc_ids.is_empty());
         assert!(chunk.doc_frequencies.is_empty());
         assert!(chunk.doc_positions.is_empty());
@@ -257,7 +266,6 @@ mod tests {
         chunk.add_doc_frequency(5);
         chunk.add_doc_positions(vec![1, 5, 10, 15, 20]);
         chunk.set_max_doc_id(100);
-        chunk.no_of_postings = 1;
 
         let encoded = chunk.encode();
 
@@ -288,7 +296,6 @@ mod tests {
         chunk.add_doc_positions(vec![30, 35, 40, 45]);
 
         chunk.set_max_doc_id(300);
-        chunk.no_of_postings = 3;
 
         let encoded = chunk.encode();
 
@@ -315,7 +322,6 @@ mod tests {
         chunk.add_doc_frequency(5);
         chunk.add_doc_frequency(3);
         chunk.set_max_doc_id(200);
-        chunk.no_of_postings = 2;
 
         let encoded = chunk.encode();
 
@@ -340,7 +346,6 @@ mod tests {
         chunk.add_doc_positions(vec![100, 200, 300, 400, 500]);
         chunk.add_doc_positions(vec![1000, 2000, 3000]);
         chunk.set_max_doc_id(2000000);
-        chunk.no_of_postings = 2;
 
         let encoded = chunk.encode();
 
@@ -365,12 +370,10 @@ mod tests {
         chunk.add_doc_frequency(5);
         chunk.add_doc_positions(vec![1, 2, 3]);
         chunk.set_max_doc_id(100);
-        chunk.no_of_postings = 1;
 
         chunk.reset();
 
         assert_eq!(chunk.size_of_chunk, 9);
-        assert_eq!(chunk.last_doc_id, 0);
         assert_eq!(chunk.max_doc_id, 0);
         assert_eq!(chunk.no_of_postings, 0);
         assert!(chunk.doc_ids.is_empty());
@@ -385,7 +388,6 @@ mod tests {
         chunk.add_doc_id(100);
         chunk.add_doc_frequency(5);
         chunk.add_doc_positions(vec![1, 2, 3]);
-        chunk.no_of_postings = 1;
 
         let encoded = chunk.encode();
         let size_from_bytes = u32::from_le_bytes(encoded[0..4].try_into().unwrap());
@@ -407,7 +409,6 @@ mod tests {
             original.add_doc_positions(positions);
         }
         original.set_max_doc_id(500);
-        original.no_of_postings = 5;
 
         let encoded = original.encode();
 

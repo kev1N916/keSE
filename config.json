@@ -1,0 +1,6 @@
+{
+  "result_dir": "index_run",
+  "index_dir": "",
+  "compression_algo": "varbyte",
+  "query_algo": "wand"
+}

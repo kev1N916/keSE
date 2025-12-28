@@ -1,9 +1,11 @@
 /target
 enwiki-20171001-pages-meta-current-withlinks-processed.tar.bz2
 enwiki-20171001-pages-meta-current-withlinks-processed
-
-/pdfs
+wikipedia
+/junk
 /index_run*
 heaprint*
 heap-*
 heaptrack*
+
+.vscode

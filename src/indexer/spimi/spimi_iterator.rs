@@ -1,6 +1,7 @@
 use std::{
     fs::{self, File},
     io::{self, BufReader, ErrorKind, Read, Seek},
+    mem,
 };
 
 use crate::{indexer::helper::vb_decode_posting_list, utils::posting::Posting};
@@ -11,6 +12,8 @@ pub struct SpimiIterator {
     no_of_terms: u32,
     file_reader: BufReader<File>,
     current_term_no: u32,
+
+    // we keep these in
     buffered_terms: Vec<String>,
     buffered_postings: Vec<Vec<u8>>,
     current_buffer_index: usize,
@@ -88,7 +91,6 @@ impl SpimiIterator {
     fn advance(&mut self) -> io::Result<()> {
         let previous_offset = self.current_offset;
 
-        // Keep capacity but clear contents
         self.buffered_postings.clear();
         self.buffered_terms.clear();
 
@@ -96,7 +98,6 @@ impl SpimiIterator {
         while (self.current_offset - previous_offset) < BUFFER_SIZE {
             let mut buf = [0u8; 4];
 
-            // Check for EOF
             if let Err(e) = self.file_reader.read_exact(&mut buf) {
                 if e.kind() == ErrorKind::UnexpectedEof {
                     return Ok(());
@@ -117,7 +118,7 @@ impl SpimiIterator {
             self.file_reader.read_exact(&mut self.read_buffer)?;
 
             self.buffered_terms.push(
-                String::from_utf8(self.read_buffer.clone())
+                String::from_utf8(mem::take(&mut self.read_buffer))
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?,
             );
             self.current_offset += string_length as u32;
@@ -126,12 +127,12 @@ impl SpimiIterator {
             let postings_length = u32::from_le_bytes(buf) as usize;
             self.current_offset += 4;
 
-            // Reuse read_buffer for postings
             self.read_buffer.clear();
             self.read_buffer.resize(postings_length, 0);
             self.file_reader.read_exact(&mut self.read_buffer)?;
 
-            self.buffered_postings.push(self.read_buffer.clone());
+            self.buffered_postings
+                .push(mem::take(&mut self.read_buffer));
             self.current_offset += postings_length as u32;
         }
 
@@ -151,14 +152,12 @@ impl SpimiIterator {
             self.advance().unwrap();
             self.current_buffer_index = 0;
         }
-        // move the data out from the buffered_terms vector instead of cloning it
         self.current_term = Some(std::mem::take(
             &mut self.buffered_terms[self.current_buffer_index],
         ));
         self.current_postings = Some(vb_decode_posting_list(
             &self.buffered_postings[self.current_buffer_index],
         ));
-        // Advance the term_no and the buffer index
         self.current_term_no += 1;
         self.current_buffer_index += 1;
         Ok(true)

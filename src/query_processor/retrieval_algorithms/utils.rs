@@ -1,5 +1,3 @@
-// --- Custom FloatDoc to Handle f32 Ordering ---
-
 use std::cmp::Ordering;
 
 use crate::{

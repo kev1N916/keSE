@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{compressor::compressor::CompressionAlgorithm, utils::chunk::Chunk};
-
+pub const MINIMUM_BLOCK_SIZE: u32 = 6;
 /*
  The unit of storage in our inverted index is a block.
  Each term can span across multiple blocks and so we need to keep track of the block ids for
@@ -206,15 +206,14 @@ mod tests {
             create_test_posting(20, vec![3, 7]),
         ];
 
-        writer.add_term(61, postings).unwrap();
+        let block_ids = writer.add_term(61, postings).unwrap();
         writer.finish().unwrap();
 
         // Read back and verify
         let mut file = temp_file.reopen().unwrap();
         let mut reader = BufReader::new(&mut file);
 
-        let metadata = writer.get_term_metadata(61).unwrap();
-        let mut block = Block::new(metadata.block_ids[0], Some(64));
+        let mut block = Block::new(block_ids[0], Some(64));
         block.decode(&mut reader).unwrap();
 
         assert_eq!(block.no_of_terms, 1);
@@ -235,7 +234,7 @@ mod tests {
         let postings1 = vec![create_test_posting(10, vec![1])];
         let postings2 = vec![create_test_posting(20, vec![2])];
 
-        writer.add_term(1, postings1).unwrap();
+        let block_ids_1 = writer.add_term(1, postings1).unwrap();
         writer.add_term(2, postings2).unwrap();
         writer.finish().unwrap();
 
@@ -243,8 +242,7 @@ mod tests {
         let mut file = temp_file.reopen().unwrap();
         let mut reader = BufReader::new(&mut file);
 
-        let metadata1 = writer.get_term_metadata(1).unwrap();
-        let mut block = Block::new(metadata1.block_ids[0], Some(64));
+        let mut block = Block::new(block_ids_1[0], Some(64));
         block.decode(&mut reader).unwrap();
 
         assert_eq!(block.no_of_terms, 2);
@@ -277,7 +275,7 @@ mod tests {
             create_test_posting(100, vec![4, 5, 6, 9, 10]),
         ];
 
-        writer.add_term(1, postings1).unwrap();
+        let block_ids = writer.add_term(1, postings1).unwrap();
         writer.add_term(2, postings2).unwrap();
         writer.finish().unwrap();
 
@@ -285,8 +283,7 @@ mod tests {
         let mut file = temp_file.reopen().unwrap();
         let mut reader = BufReader::new(&mut file);
 
-        let metadata = writer.get_term_metadata(1).unwrap();
-        let mut block = Block::new(metadata.block_ids[0], Some(64));
+        let mut block = Block::new(block_ids[0], Some(64));
         block.decode(&mut reader).unwrap();
 
         let mut chunks = block.decode_chunks_for_term(1, 0, CompressionAlgorithm::VarByte);
@@ -340,17 +337,16 @@ mod tests {
             postings.push(create_test_posting((i + 1) * 100, vec![1, 2, 3, 4, 5]));
         }
 
-        writer.add_term(1, postings.clone()).unwrap();
+        let block_ids = writer.add_term(1, postings.clone()).unwrap();
         writer.finish().unwrap();
 
         // Read back all postings from all blocks
         let mut file = temp_file.reopen().unwrap();
         let mut reader = BufReader::new(&mut file);
 
-        let metadata = writer.get_term_metadata(1).unwrap();
         let mut postings_read = Vec::new();
         // Read from all blocks
-        for block_id in &metadata.block_ids {
+        for block_id in &block_ids {
             let mut block = Block::new(*block_id, Some(32));
             block.decode(&mut reader).unwrap();
 
@@ -393,15 +389,14 @@ mod tests {
             create_test_posting(20, vec![3, 7]),
         ];
 
-        writer.add_term(1, postings).unwrap();
+        let block_ids = writer.add_term(1, postings).unwrap();
         writer.finish().unwrap();
 
         // Read back and verify
         let mut file = temp_file.reopen().unwrap();
         let mut reader = BufReader::new(&mut file);
 
-        let metadata = writer.get_term_metadata(1).unwrap();
-        let mut block = Block::new(metadata.block_ids[0], Some(3));
+        let mut block = Block::new(block_ids[0], Some(3));
         block.decode(&mut reader).unwrap();
 
         let chunks = block.decode_chunks_for_term(1, 0, CompressionAlgorithm::VarByte);
@@ -410,17 +405,6 @@ mod tests {
         // Positions should be empty when include_positions is false
         let posting1 = chunks[0].get_posting_list(0);
         assert!(posting1.is_empty());
-    }
-
-    #[test]
-    fn test_get_term_metadata_nonexistent() {
-        let temp_file = NamedTempFile::new().unwrap();
-        let file = temp_file.reopen().unwrap();
-        let mut writer =
-            SpimiMergeWriter::new(file, Some(64), None, true, CompressionAlgorithm::VarByte);
-
-        let result = writer.get_term_metadata(999);
-        assert!(result.is_none());
     }
 
     #[test]
@@ -439,15 +423,14 @@ mod tests {
         let positions: Vec<u32> = (1..=1000).collect();
         let postings = vec![create_test_posting(10, positions.clone())];
 
-        writer.add_term(1, postings).unwrap();
+        let block_ids = writer.add_term(1, postings).unwrap();
         writer.finish().unwrap();
 
         // Verify
         let mut file = temp_file.reopen().unwrap();
         let mut reader = BufReader::new(&mut file);
 
-        let metadata = writer.get_term_metadata(1).unwrap();
-        let mut block = Block::new(metadata.block_ids[0], Some(10));
+        let mut block = Block::new(block_ids[0], Some(10));
         block.decode(&mut reader).unwrap();
 
         let mut chunks = block.decode_chunks_for_term(1, 0, CompressionAlgorithm::VarByte);
@@ -480,18 +463,17 @@ mod tests {
             postings2.push(create_test_posting((i + 1) * 50, vec![4, 5, 6, 7]));
         }
 
-        writer.add_term(1, postings1.clone()).unwrap();
-        writer.add_term(2, postings2.clone()).unwrap();
+        let block_ids1 = writer.add_term(1, postings1.clone()).unwrap();
+        let block_ids2 = writer.add_term(2, postings2.clone()).unwrap();
         writer.finish().unwrap();
 
         // Read back term 1
         let mut file = temp_file.reopen().unwrap();
         let mut reader = BufReader::new(&mut file);
 
-        let metadata1 = writer.get_term_metadata(1).unwrap();
         let mut postings1_read = Vec::new();
 
-        for block_id in &metadata1.block_ids {
+        for block_id in &block_ids1 {
             let mut block = Block::new(*block_id, Some(64));
             block.decode(&mut reader).unwrap();
 
@@ -511,10 +493,9 @@ mod tests {
         }
 
         // Read back term 2
-        let metadata2 = writer.get_term_metadata(2).unwrap();
         let mut postings2_read = Vec::new();
 
-        for block_id in &metadata2.block_ids {
+        for block_id in &block_ids2 {
             let mut block = Block::new(*block_id, Some(64));
             block.decode(&mut reader).unwrap();
 
@@ -566,28 +547,25 @@ mod tests {
             postings3.push(create_test_posting((i + 1) * 15, vec![6, 7, 8, 9]));
         }
 
-        writer.add_term(1, postings1.clone()).unwrap();
-        writer.add_term(2, postings2.clone()).unwrap();
-        writer.add_term(3, postings3.clone()).unwrap();
+        let block_ids1 = writer.add_term(1, postings1.clone()).unwrap();
+        let block_ids2 = writer.add_term(2, postings2.clone()).unwrap();
+        let block_ids3 = writer.add_term(3, postings3.clone()).unwrap();
         writer.finish().unwrap();
 
         let mut file = temp_file.reopen().unwrap();
         let mut reader = BufReader::new(&mut file);
 
         // Verify all three terms
-        let terms_and_postings = vec![
-            (1, postings1, 100),
-            (2, postings2, 250),
-            (3, postings3, 175),
+        let terms_and_data = vec![
+            (1, &block_ids1, &postings1, 100),
+            (2, &block_ids2, &postings2, 250),
+            (3, &block_ids3, &postings3, 175),
         ];
 
-        for (term_id, expected_postings, expected_count) in terms_and_postings {
-            let metadata = writer.get_term_metadata(term_id).unwrap();
-            // assert!(metadata.block_ids.len() > 1);
-
+        for (term_id, block_ids, expected_postings, expected_count) in terms_and_data {
             let mut postings_read = Vec::new();
 
-            for block_id in &metadata.block_ids {
+            for block_id in block_ids {
                 let mut block = Block::new(*block_id, Some(20));
                 block.decode(&mut reader).unwrap();
 
@@ -613,7 +591,7 @@ mod tests {
             }
 
             assert_eq!(postings_read.len(), expected_count);
-            assert_eq!(expected_postings, postings_read);
+            assert_eq!(*expected_postings, postings_read);
         }
     }
 
@@ -631,6 +609,8 @@ mod tests {
 
         // Create many terms with moderate posting lists
         let mut all_postings = Vec::new();
+        let mut all_block_ids = Vec::new();
+
         for term_id in 1..=10 {
             let mut postings = Vec::new();
             for i in 0..200 {
@@ -642,9 +622,10 @@ mod tests {
             all_postings.push((term_id, postings));
         }
 
-        // Add all terms
+        // Add all terms and store their block_ids
         for (term_id, postings) in &all_postings {
-            writer.add_term(*term_id, postings.clone()).unwrap();
+            let block_ids = writer.add_term(*term_id, postings.clone()).unwrap();
+            all_block_ids.push((*term_id, block_ids));
         }
         writer.finish().unwrap();
 
@@ -652,12 +633,12 @@ mod tests {
         let mut file = temp_file.reopen().unwrap();
         let mut reader = BufReader::new(&mut file);
 
-        for (term_id, expected_postings) in &all_postings {
-            let metadata = writer.get_term_metadata(*term_id).unwrap();
-
+        for ((term_id, expected_postings), (_, block_ids)) in
+            all_postings.iter().zip(all_block_ids.iter())
+        {
             let mut postings_read = Vec::new();
 
-            for block_id in &metadata.block_ids {
+            for block_id in block_ids {
                 let mut block = Block::new(*block_id, Some(64));
                 block.decode(&mut reader).unwrap();
 
@@ -718,8 +699,8 @@ mod tests {
             small_postings2.push(create_test_posting((i + 1) * 15, vec![2, 3, 45, 122]));
         }
 
-        writer.add_term(1, small_postings.clone()).unwrap();
-        writer.add_term(2, large_postings.clone()).unwrap();
+        let block_ids1 = writer.add_term(1, small_postings.clone()).unwrap();
+        let block_ids2 = writer.add_term(2, large_postings.clone()).unwrap();
         writer.add_term(3, small_postings2.clone()).unwrap();
         writer.finish().unwrap();
 
@@ -727,14 +708,11 @@ mod tests {
         let mut reader = BufReader::new(&mut file);
 
         // Verify small term 1
-        let metadata1 = writer.get_term_metadata(1).unwrap();
-        assert_eq!(metadata1.block_ids.len(), 1);
+        assert_eq!(block_ids1.len(), 1);
 
         // Verify large term 2
-        let metadata2 = writer.get_term_metadata(2).unwrap();
-
         let mut postings2_read = Vec::new();
-        for block_id in &metadata2.block_ids {
+        for block_id in &block_ids2 {
             let mut block = Block::new(*block_id, Some(10));
             block.decode(&mut reader).unwrap();
 
@@ -780,17 +758,15 @@ mod tests {
             postings.push(create_test_posting((i + 1) * 100, positions));
         }
 
-        writer.add_term(1, postings.clone()).unwrap();
+        let block_ids = writer.add_term(1, postings.clone()).unwrap();
         writer.finish().unwrap();
 
         let mut file = temp_file.reopen().unwrap();
         let mut reader = BufReader::new(&mut file);
 
-        let metadata = writer.get_term_metadata(1).unwrap();
-
         let mut postings_read = Vec::new();
 
-        for block_id in &metadata.block_ids {
+        for block_id in &block_ids {
             let mut block = Block::new(*block_id, Some(10));
             block.decode(&mut reader).unwrap();
 

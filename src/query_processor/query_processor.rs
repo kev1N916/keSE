@@ -2,6 +2,7 @@ use std::{
     collections::HashSet,
     fs::File,
     io::{self, BufReader},
+    path::Path,
     u32,
 };
 
@@ -11,7 +12,7 @@ use crate::{
     compressor::compressor::CompressionAlgorithm,
     query_processor::{
         retrieval_algorithms::{
-            RankingAlgorithm, binary_merge::holistic_binary_merge,
+            QueryAlgorithm, binary_merge::holistic_binary_merge,
             block_max_max_score::block_max_max_score, block_max_wand::block_max_wand,
             max_score::max_score, wand::wand,
         },
@@ -21,23 +22,28 @@ use crate::{
 };
 
 pub struct QueryProcessor {
+    result_directory_path: String,
     block_cache: CacheType<u32, Block>,
     inverted_index_file: File,
     compression_algorithm: CompressionAlgorithm,
-    ranking_algorithm: RankingAlgorithm,
+    query_algorithm: QueryAlgorithm,
 }
 
 impl QueryProcessor {
     pub fn new(
+        result_directory_path: String,
         compression_algorithm: CompressionAlgorithm,
-        ranking_algorithm: RankingAlgorithm,
+        query_algorithm: QueryAlgorithm,
     ) -> io::Result<Self> {
-        let inverted_index_file = File::open("final.idx")?;
+        let save_path = Path::new(&result_directory_path).join("inverted_index.idx");
+        let inverted_index_file = File::create(save_path)?;
+
         Ok(Self {
-            block_cache: CacheType::new_lfu(50),
+            result_directory_path,
+            block_cache: CacheType::new_lfu(1000),
             inverted_index_file,
             compression_algorithm,
-            ranking_algorithm,
+            query_algorithm,
         })
     }
 
@@ -140,20 +146,18 @@ impl QueryProcessor {
         for term_iterator in &mut term_iterators {
             term_iterator.init();
         }
-        match self.ranking_algorithm {
-            RankingAlgorithm::BlockMaxMaxScore => {
+        match self.query_algorithm {
+            QueryAlgorithm::BlockMaxMaxScore => {
                 block_max_max_score(term_iterators, document_lengths, average_document_length)
             }
-            RankingAlgorithm::BlockMaxWand => {
+            QueryAlgorithm::BlockMaxWand => {
                 block_max_wand(term_iterators, document_lengths, average_document_length)
             }
-            RankingAlgorithm::MaxScore => {
+            QueryAlgorithm::MaxScore => {
                 max_score(term_iterators, document_lengths, average_document_length)
             }
-            RankingAlgorithm::Wand => {
-                wand(term_iterators, document_lengths, average_document_length)
-            }
-            RankingAlgorithm::Boolean => holistic_binary_merge(term_iterators),
+            QueryAlgorithm::Wand => wand(term_iterators, document_lengths, average_document_length),
+            QueryAlgorithm::Boolean => holistic_binary_merge(term_iterators),
         }
     }
 }

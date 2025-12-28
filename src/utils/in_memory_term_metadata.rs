@@ -10,7 +10,6 @@ pub struct InMemoryTermMetadata<'a> {
 }
 
 impl<'a> InMemoryTermMetadata<'a> {
-    // Added <'a> here
     pub fn new(
         term_id: u32,
         block_ids: &'a [u32],

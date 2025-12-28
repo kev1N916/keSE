@@ -5,7 +5,8 @@ pub mod max_score;
 mod utils;
 pub mod wand;
 
-pub enum RankingAlgorithm {
+#[derive(Debug, Clone, PartialEq)]
+pub enum QueryAlgorithm {
     Wand,
     BlockMaxWand,
     BlockMaxMaxScore,

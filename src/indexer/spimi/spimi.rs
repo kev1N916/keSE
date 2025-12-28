@@ -1,7 +1,7 @@
 use std::{
     f32,
-    fs::{self, File},
-    io::{self, BufReader, BufWriter, Write},
+    fs::File,
+    io::{self, BufWriter, Write},
     path::Path,
     sync::mpsc,
     time::SystemTime,
@@ -9,8 +9,7 @@ use std::{
 
 use crate::{
     compressor::compressor::CompressionAlgorithm,
-    dictionary::Dictionary,
-    in_memory_index::in_memory_index::InMemoryIndex,
+    in_memory_index_metadata::in_memory_index_metadata::InMemoryIndexMetadata,
     indexer::{
         helper::vb_encode_posting_list,
         spimi::{spimi_iterator::SpimiIterator, spimi_merge_writer::SpimiMergeWriter},
@@ -18,6 +17,7 @@ use crate::{
     scoring::bm_25::{BM25Params, compute_term_score},
     utils::{
         chunk_block_max_metadata::ChunkBlockMaxMetadata,
+        dictionary::Dictionary,
         posting::{Posting, merge_all_postings},
         term::Term,
     },
@@ -87,17 +87,17 @@ impl Spimi {
         document_lengths: &Vec<u32>,
         compression_algorithm: CompressionAlgorithm,
         chunk_size: u8,
-    ) -> Result<InMemoryIndex, io::Error> {
+    ) -> Result<InMemoryIndexMetadata, io::Error> {
         let current_time = SystemTime::now();
-        let mut in_memory_index: InMemoryIndex = InMemoryIndex::new();
+        let mut in_memory_index_metadata: InMemoryIndexMetadata = InMemoryIndexMetadata::new();
 
         // Iterators are created over our temporary index files
         let mut merge_iterators =
             SpimiIterator::scan_and_create_iterators(&self.result_directory_path)?;
         if merge_iterators.is_empty() {
-            return Ok(in_memory_index);
+            return Ok(in_memory_index_metadata);
         }
-        in_memory_index.no_of_docs = document_lengths.len() as u32;
+        in_memory_index_metadata.no_of_docs = document_lengths.len() as u32;
         let mut no_of_terms: u32 = 0;
         let path = Path::new(&self.result_directory_path);
         let final_index_file = File::create(path.join("inverted_index.idx").as_path())?;
@@ -128,7 +128,7 @@ impl Spimi {
 
             // The posting lists from the different iterators are accumulated and then merged
             // to create the final posting list for the current term.
-            let mut posting_lists: Vec<Vec<Posting>> = Vec::new();
+            let mut posting_lists: Vec<Vec<Posting>> = Vec::with_capacity(50);
             for it in merge_iterators.iter_mut() {
                 if let Some(curr_term) = &it.current_term {
                     if curr_term == &term {
@@ -139,7 +139,7 @@ impl Spimi {
                     }
                 }
             }
-            let final_merged = merge_all_postings(&posting_lists);
+            let final_merged = merge_all_postings(posting_lists);
 
             no_of_terms += 1;
 
@@ -164,7 +164,7 @@ impl Spimi {
                     f_dt,
                     l_d,
                     l_avg,
-                    in_memory_index.no_of_docs,
+                    in_memory_index_metadata.no_of_docs,
                     term_frequency,
                     &bm25_params,
                 );
@@ -190,80 +190,62 @@ impl Spimi {
                 });
             }
 
-            index_merge_writer.add_term(no_of_terms, final_merged)?;
+            chunk_metadata.shrink_to_fit();
+
+            let block_ids = index_merge_writer
+                .add_term(no_of_terms, final_merged)
+                .unwrap();
 
             // We add the term to term_id mapping, the max_term_score the and the metadata for
             // block max ranking to the in memory index.
-            in_memory_index.set_term_id(term, no_of_terms);
-            in_memory_index.set_term_frequency(term_frequency);
-            in_memory_index.set_max_term_score(max_term_score);
-            in_memory_index.set_chunk_block_max_metadata(chunk_metadata);
+            in_memory_index_metadata.set_term_id(term, no_of_terms);
+            in_memory_index_metadata.set_term_frequency(term_frequency);
+            in_memory_index_metadata.set_max_term_score(max_term_score);
+            in_memory_index_metadata.set_chunk_block_max_metadata(chunk_metadata);
+            in_memory_index_metadata.set_block_ids(block_ids);
             // We add the term to the bk_tree as well which helps speed up retrieval
             // in_memory_index.add_term_to_bk_tree(term);
         }
         // We close the index_merge_writer so that the remaining terms can be written to the disk.
         index_merge_writer.close()?;
-
-        // We need to also keep track of the blocks over which the terms spans.
-        // This is required during retrieval.
-
-        // let terms = in_memory_index.get_all_terms();
-        // for term in terms {
-        //     let term_id = in_memory_index.get_term_id(&term);
-        //     if term_id != 0 {
-        //         if let Some(term_metadata) = index_merge_writer.get_term_metadata(term_id) {
-        //             in_memory_index
-        //                 .set_block_ids(&term, std::mem::take(&mut term_metadata.block_ids));
-        //         }
-        //     }
-        // }
-
-        for term_id in 1..=no_of_terms {
-            if let Some(term_metadata) = index_merge_writer.get_term_metadata(term_id) {
-                in_memory_index.set_block_ids(std::mem::take(&mut term_metadata.block_ids));
-            }
-        }
-        // for term in in_memory_index.get_all_terms() {
-        //     let term_id = in_memory_index.get_term_id(&term);
-        //     if term_id != 0 {
-        //         if let Some(term_metadata) = index_merge_writer.get_term_metadata(term_id) {
-        //             in_memory_index
-        //                 .set_block_ids(&term, std::mem::take(&mut term_metadata.block_ids));
-        //         }
-        //     }
-        // }
+        in_memory_index_metadata.close();
 
         // We keep track of total no of blocks and total no of terms
-        in_memory_index.no_of_blocks = index_merge_writer.current_block_no;
-        in_memory_index.no_of_terms = no_of_terms;
+        in_memory_index_metadata.no_of_blocks = index_merge_writer.current_block_no;
+        in_memory_index_metadata.no_of_terms = no_of_terms;
         let now_time = SystemTime::now();
         println!(
             "time taken to complete merge index file{:?} with total number of terms {}",
             now_time.duration_since(current_time),
             no_of_terms
         );
-        Ok(in_memory_index)
+        Ok(in_memory_index_metadata)
     }
 
-    // We iterate over the posting lists in the dictionary and write them to disk
     fn write_dictionary_to_disk(
         &self,
         filename: &Path,
         dict: &Dictionary,
     ) -> Result<(), std::io::Error> {
         if dict.no_of_terms > 0 {
+            let current_time = SystemTime::now();
             let file = File::create(filename)?;
             let mut writer = BufWriter::new(file);
+            println!("no of terms {}", dict.no_of_terms);
             writer.write_all(&(dict.no_of_terms).to_le_bytes())?;
             for (key, value) in &dict.dictionary {
                 self.write_term_to_disk(&mut writer, key, value)?;
             }
             writer.flush()?;
+            let now_time = SystemTime::now();
+            println!(
+                "time taken to complete writing the disk{:?}",
+                now_time.duration_since(current_time).unwrap()
+            );
         }
         Ok(())
     }
 
-    // The posting list is encoded before being written to the disk.
     fn write_term_to_disk(
         &self,
         writer: &mut BufWriter<File>,

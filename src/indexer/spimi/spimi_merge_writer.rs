@@ -1,12 +1,15 @@
 use std::{
-    collections::HashMap,
     fs::File,
     io::{self, BufWriter, Write},
 };
 
 use crate::{
     compressor::compressor::CompressionAlgorithm,
-    utils::{block::Block, chunk::Chunk, posting::Posting},
+    utils::{
+        block::{Block, MINIMUM_BLOCK_SIZE},
+        chunk::Chunk,
+        posting::Posting,
+    },
 };
 
 // An inverted list in the index will often stretch across multiple blocks, starting somewhere in one block and ending some-
@@ -19,22 +22,9 @@ use crate::{
 // (In fact, this index organization allows us to first decode all docIDs of a chunk, and then later the
 // frequencies or positions if needed.)
 
-pub struct TermMetadata {
-    pub block_ids: Vec<u32>,
-    pub term_frequency: u32,
-}
-
-impl TermMetadata {
-    pub fn add_block_id(&mut self, block_id: u32) {
-        self.block_ids.push(block_id);
-    }
-    pub fn set_term_frequency(&mut self, term_frequency: u32) {
-        self.term_frequency = term_frequency;
-    }
-}
 pub struct SpimiMergeWriter {
     buffered_block_bytes: Vec<u8>, // the buffered block bytes which are written to the disk at intervals
-    pub term_metadata: HashMap<u32, TermMetadata>,
+    // pub term_metadata: HashMap<u32, TermMetadata>,
     pub current_block_no: u32,   // the id or number of the current block
     pub current_block: Block,    // the current block which is being written to
     pub include_positions: bool, // whether or not positions should be included in our chunks
@@ -54,7 +44,7 @@ impl SpimiMergeWriter {
     ) -> Self {
         Self {
             buffered_block_bytes: Vec::with_capacity(3_000_000),
-            term_metadata: HashMap::new(),
+            // term_metadata: HashMap::new(),
             current_block_no: 0,
             current_block: Block::new(0, block_size),
             include_positions,
@@ -78,55 +68,47 @@ impl SpimiMergeWriter {
         self.finish()
     }
 
-    fn add_block_to_term_metadata(&mut self, term: u32, block_no: u32) {
-        if let Some(metadata) = self.term_metadata.get_mut(&term) {
-            metadata.add_block_id(block_no);
-        }
-    }
-    fn add_frequency_to_term_metadata(&mut self, term: u32, frequency: u32) {
-        if let Some(metadata) = self.term_metadata.get_mut(&term) {
-            metadata.set_term_frequency(frequency);
-        }
-    }
-    fn initialize_term_metadata(&mut self, term: u32) {
-        self.term_metadata.entry(term).or_insert(TermMetadata {
-            block_ids: Vec::with_capacity(4),
-            term_frequency: 0,
-        });
-    }
-    pub fn get_term_metadata(&mut self, term: u32) -> Option<&mut TermMetadata> {
-        self.term_metadata.get_mut(&term).take()
-    }
-    pub fn add_term(&mut self, term: u32, postings: Vec<Posting>) -> io::Result<()> {
+    pub fn add_term(&mut self, term: u32, postings: Vec<Posting>) -> io::Result<Vec<u32>> {
         // if it is not possible to add a new term to the block then we will reset the block
+        // and write it to the index file
         // the minimum number of bytes necessary to add a new term is 6 bytes for term and term_offset
-        // 9 bytes for the empty chunk
-        // we try to avoid empty chunks if possible
-        if self.current_block.space_left() < 6 {
+        if self.current_block.space_left() <= MINIMUM_BLOCK_SIZE {
             self.write_block_to_index_file()?;
             self.current_block.reset();
         }
-        self.initialize_term_metadata(term);
-        self.add_block_to_term_metadata(term, self.current_block_no);
-        self.add_frequency_to_term_metadata(term, postings.len() as u32);
-        self.current_block.add_term(term);
+
+        let mut block_ids: Vec<u32> = Vec::new();
         let mut current_chunk = Chunk::new(term, self.compression_algorithm.clone());
 
+        // the term metadata has to be initialized and the current block no has to be added to the
+        //  metadata
+        // self.initialize_term_metadata(term);
+        // self.add_block_to_term_metadata(term, self.current_block_no);
+        // self.add_frequency_to_term_metadata(term, postings.len() as u32);
+
+        // we add the term to the block
+        self.current_block.add_term(term);
+        block_ids.push(self.current_block_no);
         let mut i = 0;
         let postings_length = postings.len();
 
         let mut postings_iter = postings.into_iter();
         loop {
+            // Once the chunk is full, it is encoded and added to the block
             if current_chunk.no_of_postings >= self.chunk_size {
                 let chunk_bytes = current_chunk.encode();
 
+                // we check to see if this chunk can be added to the current block
+                // if that is not possible we write the current block and we start a new block
                 if self.current_block.space_left() >= chunk_bytes.len() as u32 {
                     self.current_block.add_chunk_bytes(chunk_bytes);
                 } else {
                     self.write_block_to_index_file()?;
                     self.current_block.reset();
+
                     self.current_block.add_term(term);
-                    self.add_block_to_term_metadata(term, self.current_block_no);
+                    block_ids.push(self.current_block_no);
+
                     if chunk_bytes.len() as u32 > self.current_block.space_left() {
                         panic!("chunk cannot fit in block")
                     }
@@ -134,11 +116,14 @@ impl SpimiMergeWriter {
                 }
 
                 if i == postings_length {
-                    return Ok(());
+                    block_ids.shrink_to_fit();
+                    return Ok(block_ids);
                 }
 
                 current_chunk.reset();
             }
+
+            // We have reached the end of this posting list
             let current_posting = match postings_iter.next() {
                 Some(p) => p,
                 None => {
@@ -149,22 +134,23 @@ impl SpimiMergeWriter {
                         self.write_block_to_index_file()?;
                         self.current_block.reset();
                         self.current_block.add_term(term);
-                        self.add_block_to_term_metadata(term, self.current_block_no);
+                        block_ids.push(self.current_block_no);
                         if chunk_bytes.len() as u32 > self.current_block.space_left() {
                             panic!("chunk cannot fit in block")
                         }
                         self.current_block.add_chunk_bytes(chunk_bytes);
                     }
-                    return Ok(());
+                    block_ids.shrink_to_fit();
+                    return Ok(block_ids);
                 }
             };
 
+            // we add this doc to the current chunk
             current_chunk.add_doc_id(current_posting.doc_id);
             current_chunk.add_doc_frequency(current_posting.positions.len() as u32);
             if current_posting.positions.len() > 0 && self.include_positions {
                 current_chunk.add_doc_positions(current_posting.positions);
             }
-            current_chunk.no_of_postings += 1;
             i += 1;
         }
     }
@@ -204,7 +190,6 @@ mod tests {
         let file = temp_file.reopen().unwrap();
         let writer = SpimiMergeWriter::new(file, None, None, true, CompressionAlgorithm::Simple16);
 
-        assert_eq!(writer.term_metadata.len(), 0);
         assert_eq!(writer.current_block_no, 0);
         assert_eq!(writer.chunk_size, 128);
     }
@@ -234,11 +219,6 @@ mod tests {
         let result = writer.add_term(1, postings);
         writer.finish().unwrap();
         assert!(result.is_ok());
-
-        // Check term metadata was updated
-        let metadata = writer.get_term_metadata(1).unwrap();
-        assert_eq!(metadata.term_frequency, 2);
-        assert_eq!(metadata.block_ids.len(), 1);
     }
 
     #[test]
@@ -255,18 +235,18 @@ mod tests {
         writer.add_term(2, postings2).unwrap();
         writer.finish().unwrap();
 
-        {
-            let metadata1 = writer.get_term_metadata(1).unwrap();
-            assert_eq!(metadata1.term_frequency, 1);
-            assert!(metadata1.block_ids.len() > 0);
-        } // metadata1 reference dropped here
+        // {
+        //     let metadata1 = writer.get_term_metadata(1).unwrap();
+        //     assert_eq!(metadata1.term_frequency, 1);
+        //     assert!(metadata1.block_ids.len() > 0);
+        // } // metadata1 reference dropped here
 
-        // Check metadata2
-        {
-            let metadata2 = writer.get_term_metadata(2).unwrap();
-            assert_eq!(metadata2.term_frequency, 1);
-            assert!(metadata2.block_ids.len() > 0);
-        }
+        // // Check metadata2
+        // {
+        //     let metadata2 = writer.get_term_metadata(2).unwrap();
+        //     assert_eq!(metadata2.term_frequency, 1);
+        //     assert!(metadata2.block_ids.len() > 0);
+        // }
     }
 
     #[test]
@@ -286,8 +266,8 @@ mod tests {
         assert!(result.is_ok());
         writer.finish().unwrap();
 
-        let metadata = writer.get_term_metadata(1).unwrap();
-        assert_eq!(metadata.term_frequency, 150);
+        // let metadata = writer.get_term_metadata(1).unwrap();
+        // assert_eq!(metadata.term_frequency, 150);
     }
 
     #[test]
@@ -322,8 +302,8 @@ mod tests {
         assert!(result.is_ok());
         writer.finish().unwrap();
 
-        let metadata = writer.get_term_metadata(1).unwrap();
-        assert_eq!(metadata.term_frequency, 0);
+        // let metadata = writer.get_term_metadata(1).unwrap();
+        // assert_eq!(metadata.term_frequency, 0);
     }
 
     #[test]
@@ -342,8 +322,8 @@ mod tests {
         assert!(result.is_ok());
         writer.finish().unwrap();
 
-        let metadata = writer.get_term_metadata(1).unwrap();
-        assert_eq!(metadata.term_frequency, 2);
+        // let metadata = writer.get_term_metadata(1).unwrap();
+        // assert_eq!(metadata.term_frequency, 2);
     }
 
     #[test]
@@ -361,8 +341,8 @@ mod tests {
         assert!(result.is_ok());
         writer.finish().unwrap();
 
-        let metadata = writer.get_term_metadata(1).unwrap();
-        assert_eq!(metadata.term_frequency, 1);
+        // let metadata = writer.get_term_metadata(1).unwrap();
+        // assert_eq!(metadata.term_frequency, 1);
     }
 
     #[test]
@@ -432,11 +412,11 @@ mod tests {
             .unwrap();
         writer.finish().unwrap();
 
-        assert_eq!(writer.get_term_metadata(1).unwrap().term_frequency, 1);
-        assert_eq!(writer.get_term_metadata(2).unwrap().term_frequency, 50);
-        assert_eq!(writer.get_term_metadata(3).unwrap().term_frequency, 1);
-        assert_eq!(writer.get_term_metadata(4).unwrap().term_frequency, 0);
-        assert_eq!(writer.get_term_metadata(5).unwrap().term_frequency, 2);
+        // assert_eq!(writer.get_term_metadata(1).unwrap().term_frequency, 1);
+        // assert_eq!(writer.get_term_metadata(2).unwrap().term_frequency, 50);
+        // assert_eq!(writer.get_term_metadata(3).unwrap().term_frequency, 1);
+        // assert_eq!(writer.get_term_metadata(4).unwrap().term_frequency, 0);
+        // assert_eq!(writer.get_term_metadata(5).unwrap().term_frequency, 2);
     }
 
     #[test]
@@ -456,8 +436,8 @@ mod tests {
         assert!(result.is_ok());
         writer.finish().unwrap();
 
-        let metadata = writer.get_term_metadata(1).unwrap();
-        assert_eq!(metadata.term_frequency, 3);
+        // let metadata = writer.get_term_metadata(1).unwrap();
+        // assert_eq!(metadata.term_frequency, 3);
     }
 
     #[test]
@@ -474,8 +454,8 @@ mod tests {
         assert!(result.is_ok());
         writer.finish().unwrap();
 
-        let metadata = writer.get_term_metadata(1).unwrap();
-        assert_eq!(metadata.term_frequency, 128);
+        // let metadata = writer.get_term_metadata(1).unwrap();
+        // assert_eq!(metadata.term_frequency, 128);
     }
 
     #[test]
@@ -492,7 +472,7 @@ mod tests {
         assert!(result.is_ok());
         writer.finish().unwrap();
 
-        let metadata = writer.get_term_metadata(1).unwrap();
-        assert_eq!(metadata.term_frequency, 129);
+        // let metadata = writer.get_term_metadata(1).unwrap();
+        // assert_eq!(metadata.term_frequency, 129);
     }
 }

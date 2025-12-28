@@ -32,16 +32,17 @@ impl PartialOrd for PostingWithSource {
     }
 }
 
-pub fn merge_all_postings(lists: &[Vec<Posting>]) -> Vec<Posting> {
+pub fn merge_all_postings(lists: Vec<Vec<Posting>>) -> Vec<Posting> {
     let total_size: usize = lists.iter().map(|l| l.len()).sum();
     let mut result = Vec::with_capacity(total_size);
     let mut heap = BinaryHeap::new();
 
-    // Initialize heap with first element from each list
-    for (idx, list) in lists.iter().enumerate() {
-        if !list.is_empty() {
+    let mut iterators: Vec<_> = lists.into_iter().map(|list| list.into_iter()).collect();
+
+    for (idx, iter) in iterators.iter_mut().enumerate() {
+        if let Some(posting) = iter.next() {
             heap.push(PostingWithSource {
-                posting: list[0].clone(),
+                posting,
                 list_idx: idx,
                 pos_in_list: 0,
             });
@@ -55,18 +56,14 @@ pub fn merge_all_postings(lists: &[Vec<Posting>]) -> Vec<Posting> {
     }) = heap.pop()
     {
         result.push(posting);
-
-        // Add next element from same list
-        let next_pos = pos_in_list + 1;
-        if next_pos < lists[list_idx].len() {
+        if let Some(next_posting) = iterators[list_idx].next() {
             heap.push(PostingWithSource {
-                posting: lists[list_idx][next_pos].clone(),
+                posting: next_posting,
                 list_idx,
-                pos_in_list: next_pos,
+                pos_in_list: pos_in_list + 1,
             });
         }
     }
-
     result
 }
 

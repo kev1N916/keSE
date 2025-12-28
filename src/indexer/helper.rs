@@ -45,72 +45,58 @@ pub(crate) fn vb_encode_positions(positions: &Vec<u32>) -> Vec<u8> {
 pub(crate) fn vb_decode_posting_list(encoded_bytes: &[u8]) -> Vec<Posting> {
     let mut posting_list: Vec<Posting> = Vec::new();
     let mut offset = 0;
-    let mut last_doc_id = 0;
 
     while offset < encoded_bytes.len() {
-        // Decode doc_id (or doc_id_difference after first posting)
-        let (doc_id_raw, bytes_read) = vb_decode(&encoded_bytes[offset..]);
-        offset += bytes_read;
-
-        // Calculate actual doc_id
-        let doc_id = if last_doc_id == 0 {
-            doc_id_raw // First posting uses absolute doc_id
-        } else {
-            last_doc_id + doc_id_raw // Subsequent postings use difference
-        };
-
-        // Read positions length (2 bytes, little endian)
-        if offset + 2 > encoded_bytes.len() {
-            break; // Not enough bytes for length
+        let doc_id = u32::from_le_bytes(encoded_bytes[offset..offset + 4].try_into().unwrap());
+        offset += 4;
+        let no_of_positions =
+            u32::from_le_bytes(encoded_bytes[offset..offset + 4].try_into().unwrap());
+        offset += 4;
+        let mut positions = Vec::with_capacity(no_of_positions as usize);
+        for _ in 0..no_of_positions {
+            let position =
+                u32::from_le_bytes(encoded_bytes[offset..offset + 4].try_into().unwrap());
+            positions.push(position);
+            offset += 4;
         }
-        let positions_length =
-            u16::from_le_bytes([encoded_bytes[offset], encoded_bytes[offset + 1]]) as usize;
-        offset += 2;
-
-        // Read and decode positions
-        if offset + positions_length > encoded_bytes.len() {
-            break; // Not enough bytes for positions
-        }
-        let positions = vb_decode_positions(&encoded_bytes[offset..offset + positions_length]);
-        offset += positions_length;
-
-        // Create posting and add to list
         posting_list.push(Posting { doc_id, positions });
-
-        last_doc_id = doc_id;
     }
 
     posting_list
 }
 
 pub(crate) fn vb_encode_posting_list(posting_list: &Vec<Posting>) -> Vec<u8> {
-    let mut posting_list_bytes: Vec<u8> = Vec::<u8>::new();
-    let mut last_doc_id = 0;
+    let mut posting_list_bytes: Vec<u8> = Vec::<u8>::with_capacity(200);
     // posting_list.sort_by(|a, b| a.doc_id.cmp(&b.doc_id));
     let mut indices: Vec<usize> = (0..posting_list.len()).collect();
     indices.sort_unstable_by_key(|&i| posting_list[i].doc_id);
 
     for &idx in &indices {
         let posting = &posting_list[idx];
-        if last_doc_id == 0 {
-            let mut posting_bytes = vb_encode(&posting.doc_id);
-            let mut position_bytes = vb_encode_positions(&posting.positions);
-            posting_list_bytes.append(&mut posting_bytes);
-            let positions_length: u16 = position_bytes.len() as u16;
-            let mut length_bytes: Vec<u8> = positions_length.to_le_bytes().to_vec();
-            posting_list_bytes.append(&mut length_bytes);
-            posting_list_bytes.append(&mut position_bytes);
-        } else {
-            let doc_id_difference = posting.doc_id - last_doc_id;
-            let mut posting_bytes = vb_encode(&doc_id_difference);
-            let mut position_bytes = vb_encode_positions(&posting.positions);
-            posting_list_bytes.append(&mut posting_bytes);
-            let positions_length: u16 = position_bytes.len() as u16;
-            let mut length_bytes: Vec<u8> = positions_length.to_le_bytes().to_vec();
-            posting_list_bytes.append(&mut length_bytes);
-            posting_list_bytes.append(&mut position_bytes);
+        posting_list_bytes.extend(posting.doc_id.to_le_bytes());
+        posting_list_bytes.extend((posting.positions.len() as u32).to_le_bytes());
+        for position in &posting.positions {
+            posting_list_bytes.extend(position.to_le_bytes());
         }
-        last_doc_id = posting.doc_id
+        // if last_doc_id == 0 {
+        //     let mut posting_bytes = vb_encode(&posting.doc_id);
+        //     let mut position_bytes = vb_encode_positions(&posting.positions);
+        //     posting_list_bytes.append(&mut posting_bytes);
+        //     let positions_length: u16 = position_bytes.len() as u16;
+        //     let mut length_bytes: Vec<u8> = positions_length.to_le_bytes().to_vec();
+        //     posting_list_bytes.append(&mut length_bytes);
+        //     posting_list_bytes.append(&mut position_bytes);
+        // } else {
+        //     let doc_id_difference = posting.doc_id - last_doc_id;
+        //     let mut posting_bytes = vb_encode(&doc_id_difference);
+        //     let mut position_bytes = vb_encode_positions(&posting.positions);
+        //     posting_list_bytes.append(&mut posting_bytes);
+        //     let positions_length: u16 = position_bytes.len() as u16;
+        //     let mut length_bytes: Vec<u8> = positions_length.to_le_bytes().to_vec();
+        //     posting_list_bytes.append(&mut length_bytes);
+        //     posting_list_bytes.append(&mut position_bytes);
+        // }
+        // last_doc_id = posting.doc_id
     }
 
     posting_list_bytes
