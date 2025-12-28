@@ -758,6 +758,7 @@ dependencies = [
  "mimalloc",
  "once_cell",
  "pdf-extract",
+ "priority-queue",
  "regex",
  "rustc-hash",
  "rustyline",

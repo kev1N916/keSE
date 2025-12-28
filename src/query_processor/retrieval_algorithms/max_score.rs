@@ -12,7 +12,7 @@ pub fn max_score(
     mut term_iterators: Vec<TermIterator>,
     doc_lengths: &Vec<u32>,
     average_doc_length: f32,
-) -> Vec<u32> {
+) -> Vec<(u32, f32)> {
     term_iterators.sort_by(|a, b| a.get_max_score().total_cmp(&b.get_max_score()));
     let n = term_iterators.len();
     let mut ub = vec![0.0; term_iterators.len()];
@@ -79,7 +79,7 @@ pub fn max_score(
     let mut doc_ids = Vec::new();
     while !pq.is_empty() {
         if let Some(doc) = pq.pop() {
-            doc_ids.push(doc.0.0.docid);
+            doc_ids.push((doc.0.0.docid, doc.0.0.score));
         }
     }
     doc_ids

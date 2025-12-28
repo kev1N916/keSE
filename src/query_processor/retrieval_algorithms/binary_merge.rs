@@ -23,7 +23,7 @@ pub fn binary_merge(mut term_iterators: Vec<TermIterator>) -> Vec<u32> {
 }
 
 // supposedly faster
-pub fn holistic_binary_merge(mut term_iterators: Vec<TermIterator>) -> Vec<u32> {
+pub fn holistic_binary_merge(mut term_iterators: Vec<TermIterator>) -> Vec<(u32, f32)> {
     term_iterators.sort_by(|a, b| a.get_no_of_postings().cmp(&b.get_no_of_postings()));
     let mut current = term_iterators[0].get_current_doc_id();
     let mut i = 1;
@@ -47,7 +47,7 @@ pub fn holistic_binary_merge(mut term_iterators: Vec<TermIterator>) -> Vec<u32> 
         }
 
         if i == term_iterators.len() {
-            doc_ids.push(current as u32);
+            doc_ids.push((current as u32, 0.0));
             term_iterators[0].next();
             current = term_iterators[0].get_current_doc_id();
             i = 1;

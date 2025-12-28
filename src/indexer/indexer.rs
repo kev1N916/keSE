@@ -44,10 +44,10 @@ pub struct DocumentMetadata {
 // needed to answer queries.
 pub struct Indexer {
     pub avg_doc_length: f32,
-    doc_id: u32,
+    pub doc_id: u32,
     include_positions: bool,
-    document_names: Vec<String>,
-    document_urls: Vec<String>,
+    pub document_names: Vec<String>,
+    pub document_urls: Vec<String>,
     pub document_lengths: Vec<u32>,
     index_directory_path: String,
     search_tokenizer: SearchTokenizer,
@@ -269,7 +269,6 @@ impl Indexer {
     }
 
     pub fn set_index_directory_path(&mut self, index_directory_path: String) {
-        println!("sdaasdasdda hwywy");
         self.index_directory_path = index_directory_path;
     }
 

@@ -15,7 +15,7 @@ use crate::{
 };
 
 pub struct SearchEngine {
-    query_cache: CacheType<String, Vec<u32>>,
+    query_cache: CacheType<String, Vec<(u32, f32)>>,
     query_processor: QueryProcessor,
     query_parser: SearchTokenizer,
     indexer: Indexer,
@@ -46,6 +46,18 @@ impl SearchEngine {
         } else if result_path.is_file() {
             fs::create_dir_all(result_path).unwrap();
         }
+        let inverted_index_path = Path::new(&result_directory_path).join("inverted_index.idx");
+        if !inverted_index_path.exists() {
+            println!("does not exist");
+            if let Err(e) = File::create_new(inverted_index_path) {
+                if e.kind() != ErrorKind::AlreadyExists {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("Error creating inverted index file: {}", e),
+                    ));
+                }
+            }
+        }
         let query_parser = SearchTokenizer::new()?;
         let mut indexer = Indexer::new(
             query_parser.clone(),
@@ -73,6 +85,10 @@ impl SearchEngine {
         })
     }
 
+    fn merge_spimi_files(&mut self) -> io::Result<()> {
+        self.in_memory_index_metadata = self.indexer.merge_spimi_files()?;
+        Ok(())
+    }
     pub fn build_index(&mut self) -> io::Result<()> {
         self.in_memory_index_metadata = self.indexer.index()?;
         Ok(())
@@ -150,13 +166,16 @@ impl SearchEngine {
         &self.compression_algorithm
     }
 
-    pub fn handle_query(&mut self, query: String) -> Result<Vec<DocumentMetadata>, io::Error> {
+    pub fn handle_query(
+        &mut self,
+        query: String,
+    ) -> Result<Vec<(DocumentMetadata, f32)>, io::Error> {
         let mut result_metadata = Vec::new();
-
+        println!("started processing");
         if let Some(result_docs) = self.query_cache.get(&query) {
             for doc in result_docs {
-                if let Some(metadata) = self.indexer.get_doc_metadata(*doc) {
-                    result_metadata.push(metadata);
+                if let Some(metadata) = self.indexer.get_doc_metadata(doc.0) {
+                    result_metadata.push((metadata, doc.1));
                 }
             }
         } else {
@@ -185,8 +204,8 @@ impl SearchEngine {
             );
 
             for doc in &result_docs {
-                if let Some(metadata) = self.indexer.get_doc_metadata(*doc) {
-                    result_metadata.push(metadata);
+                if let Some(metadata) = self.indexer.get_doc_metadata(doc.0) {
+                    result_metadata.push((metadata, doc.1));
                 }
             }
             self.query_cache.put(query, result_docs, 0);
@@ -205,6 +224,33 @@ mod tests {
     };
 
     #[test]
+    fn test_load_document_metadata() {
+        let mut search_engine = SearchEngine::new(
+            "wikipedia".to_string(),
+            CompressionAlgorithm::Simple16,
+            QueryAlgorithm::Wand,
+            "index_run_2".to_string(),
+        )
+        .unwrap();
+
+        search_engine.load_document_metadata().unwrap();
+    }
+
+    #[test]
+    fn test_save_index() {
+        let mut search_engine = SearchEngine::new(
+            "wikipedia".to_string(),
+            CompressionAlgorithm::Simple16,
+            QueryAlgorithm::Wand,
+            "index_run_2".to_string(),
+        )
+        .unwrap();
+        search_engine.load_document_metadata().unwrap();
+        search_engine.merge_spimi_files().unwrap();
+        search_engine.save_index().unwrap();
+    }
+
+    #[test]
     fn test_load_index() {
         let mut search_engine = SearchEngine::new(
             "wikipedia".to_string(),
@@ -215,5 +261,22 @@ mod tests {
         .unwrap();
 
         search_engine.load_index().unwrap();
+    }
+
+    #[test]
+    fn test_query_index() {
+        let mut search_engine = SearchEngine::new(
+            "wikipedia".to_string(),
+            CompressionAlgorithm::Simple16,
+            QueryAlgorithm::Wand,
+            "index_run_2".to_string(),
+        )
+        .unwrap();
+
+        search_engine.load_index().unwrap();
+        let results = search_engine
+            .handle_query("khabib tony ferguson".to_string())
+            .unwrap();
+        println!("{:?}", results.len());
     }
 }

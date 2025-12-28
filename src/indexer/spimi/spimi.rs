@@ -157,8 +157,8 @@ impl Spimi {
 
             for posting in &final_merged {
                 let f_dt = posting.positions.len() as u32;
-                // let l_d = document_lengths[(posting.doc_id - 1) as usize];
-                let l_d = 200;
+                let l_d = document_lengths[(posting.doc_id - 1) as usize];
+                // let l_d = 200;
                 // We compute the contribution of this document to the term_score
                 let term_score: f32 = compute_term_score(
                     f_dt,
@@ -231,11 +231,11 @@ impl Spimi {
             let file = File::create(filename)?;
             let mut writer = BufWriter::new(file);
             writer.write_all(&(dict.no_of_terms).to_le_bytes())?;
-            for (key, value) in &dict.dictionary{
+            for (key, value) in &dict.dictionary {
                 self.write_term_to_disk(&mut writer, key, value)?;
             }
             writer.flush()?;
-        } 
+        }
         Ok(())
     }
 

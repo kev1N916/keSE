@@ -1,5 +1,5 @@
 use crate::utils::chunk_block_max_metadata::ChunkBlockMaxMetadata;
-
+#[derive(Debug)]
 pub struct BlockMaxIterator {
     block_index: usize,
     blocks: Vec<ChunkBlockMaxMetadata>,

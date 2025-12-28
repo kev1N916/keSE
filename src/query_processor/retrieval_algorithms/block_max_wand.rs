@@ -12,7 +12,7 @@ pub fn block_max_wand(
     mut term_iterators: Vec<TermIterator>,
     doc_lengths: &Vec<u32>,
     average_doc_length: f32,
-) -> Vec<u32> {
+) -> Vec<(u32, f32)> {
     let mut pq: BinaryHeap<Reverse<FloatDoc>> = BinaryHeap::with_capacity(20);
     let mut threshold = 0.0;
     sort_by_doc_id(&mut term_iterators);
@@ -104,7 +104,7 @@ pub fn block_max_wand(
     let mut doc_ids = Vec::new();
     while !pq.is_empty() {
         if let Some(doc) = pq.pop() {
-            doc_ids.push(doc.0.0.docid);
+            doc_ids.push((doc.0.0.docid, doc.0.0.score));
         }
     }
     doc_ids

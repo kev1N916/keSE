@@ -35,8 +35,8 @@ impl QueryProcessor {
         compression_algorithm: CompressionAlgorithm,
         query_algorithm: QueryAlgorithm,
     ) -> io::Result<Self> {
-        let save_path = Path::new(&result_directory_path).join("inverted_index.idx");
-        let inverted_index_file = File::create(save_path)?;
+        let inverted_index_path = Path::new(&result_directory_path).join("inverted_index.idx");
+        let inverted_index_file = File::open(inverted_index_path)?;
 
         Ok(Self {
             result_directory_path,
@@ -99,7 +99,7 @@ impl QueryProcessor {
         query_metadata: Vec<InMemoryTermMetadata>,
         document_lengths: &Vec<u32>,
         average_document_length: f32,
-    ) -> Vec<u32> {
+    ) -> Vec<(u32, f32)> {
         let mut term_iterators: Vec<TermIterator> = Vec::with_capacity(query_terms.len());
         let mut reader: BufReader<&mut File> = BufReader::new(&mut self.inverted_index_file);
 
@@ -125,6 +125,7 @@ impl QueryProcessor {
                     if term_index == -1 {
                         continue;
                     }
+
                     chunks.extend(new_block.decode_chunks_for_term(
                         query_metadata[i].term_id,
                         term_index as usize,

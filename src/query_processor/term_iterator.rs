@@ -8,7 +8,7 @@ use crate::{
         chunk_iterator::ChunkIterator,
     },
 };
-
+#[derive(Debug)]
 pub struct TermIterator {
     pub term: String,
     pub term_id: u32,
@@ -28,6 +28,7 @@ impl TermIterator {
         max_score: f32,
         chunk_metadata: Vec<ChunkBlockMaxMetadata>,
     ) -> Self {
+        println!("{}", chunks.len());
         Self {
             term,
             term_id,
@@ -60,11 +61,11 @@ impl TermIterator {
     }
 
     pub fn next(&mut self) -> bool {
-        let is_complete = self.chunk_iterator.next();
-        if !is_complete {
+        let is_next_element_present = self.chunk_iterator.next();
+        if !is_next_element_present {
             self.is_complete = true;
         }
-        is_complete
+        is_next_element_present
     }
 
     pub fn is_complete(&mut self) -> bool {
@@ -80,6 +81,9 @@ impl TermIterator {
     }
     pub fn advance(&mut self, doc_id: u32) {
         self.chunk_iterator.advance(doc_id);
+        if self.chunk_iterator.get_doc_id() < doc_id {
+            self.is_complete = true;
+        }
     }
     pub fn get_all_doc_ids(&mut self) -> Vec<u32> {
         let mut doc_ids = Vec::new();
