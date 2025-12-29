@@ -1,6 +1,9 @@
+use std::u64;
+
 use crate::utils::chunk_block_max_metadata::ChunkBlockMaxMetadata;
 #[derive(Debug)]
 pub struct BlockMaxIterator {
+    is_complete: bool,
     block_index: usize,
     blocks: Vec<ChunkBlockMaxMetadata>,
 }
@@ -8,13 +11,17 @@ pub struct BlockMaxIterator {
 impl BlockMaxIterator {
     pub fn new(blocks: Vec<ChunkBlockMaxMetadata>) -> Self {
         Self {
+            is_complete: false,
             block_index: 0,
             blocks,
         }
     }
 
-    pub fn last(&self) -> u32 {
-        self.blocks[self.block_index].chunk_last_doc_id
+    pub fn last(&self) -> u64 {
+        if self.is_complete {
+            return u64::MAX;
+        }
+        self.blocks[self.block_index].chunk_last_doc_id as u64
     }
 
     pub fn score(&self) -> f32 {
@@ -22,8 +29,14 @@ impl BlockMaxIterator {
     }
 
     pub fn advance(&mut self, doc_id: u32) {
-        while self.blocks[self.block_index].chunk_last_doc_id < doc_id {
+        while self.block_index + 1 < self.blocks.len()
+            && self.blocks[self.block_index].chunk_last_doc_id < doc_id
+        {
             self.block_index += 1;
+        }
+
+        if self.blocks[self.block_index].chunk_last_doc_id < doc_id {
+            self.is_complete = true;
         }
     }
 }

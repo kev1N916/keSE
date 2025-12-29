@@ -1,6 +1,6 @@
 {
-  "result_dir": "index_run",
-  "index_dir": "",
-  "compression_algo": "varbyte",
-  "query_algo": "wand"
+  "result_dir": "index_run_2",
+  "index_dir": "wikipedia",
+  "compression_algo": "simple16",
+  "query_algo": "bmms"
 }

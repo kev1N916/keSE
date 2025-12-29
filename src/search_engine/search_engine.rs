@@ -48,7 +48,6 @@ impl SearchEngine {
         }
         let inverted_index_path = Path::new(&result_directory_path).join("inverted_index.idx");
         if !inverted_index_path.exists() {
-            println!("does not exist");
             if let Err(e) = File::create_new(inverted_index_path) {
                 if e.kind() != ErrorKind::AlreadyExists {
                     return Err(io::Error::new(
@@ -268,15 +267,14 @@ mod tests {
         let mut search_engine = SearchEngine::new(
             "wikipedia".to_string(),
             CompressionAlgorithm::Simple16,
-            QueryAlgorithm::Wand,
+            QueryAlgorithm::BlockMaxMaxScore,
             "index_run_2".to_string(),
         )
         .unwrap();
 
         search_engine.load_index().unwrap();
-        let results = search_engine
-            .handle_query("khabib tony ferguson".to_string())
-            .unwrap();
-        println!("{:?}", results.len());
+        let query_string = "misery movie".to_string();
+        let results = search_engine.handle_query(query_string).unwrap();
+        println!("{:?}", results);
     }
 }

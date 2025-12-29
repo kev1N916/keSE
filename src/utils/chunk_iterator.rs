@@ -40,12 +40,6 @@ impl ChunkIterator {
             self.current_chunk_index += 1;
         }
         self.init();
-        println!(
-            "{} {} {:?}",
-            self.current_chunk_index,
-            self.chunks.len(),
-            self.chunks[self.current_chunk_index].doc_ids
-        );
         if doc_id <= self.chunks[self.current_chunk_index].max_doc_id {
             while self.get_doc_id() < doc_id {
                 self.next();

@@ -22,14 +22,15 @@ pub fn block_max_max_score(
     }
     let mut pivot = 0;
     let mut threshold = 0.0;
-    let mut pq: BinaryHeap<Reverse<FloatDoc>> = BinaryHeap::with_capacity(20);
+    let max_size = 20;
+    let mut pq: BinaryHeap<Reverse<FloatDoc>> = BinaryHeap::with_capacity(max_size);
     let mut current = u64::MAX;
     for term_iterator in &term_iterators {
         current = current.min(term_iterator.get_current_doc_id());
     }
     let params = BM25Params::default();
 
-    while pivot < n && current != 0 {
+    while pivot < n && current != u64::MAX {
         let mut score = 0.0;
         let mut next = u64::MAX;
 
@@ -47,8 +48,7 @@ pub fn block_max_max_score(
                 next = term_iterators[i].get_current_doc_id();
             }
         }
-
-        if score + ub[pivot - 1] > threshold {
+        if score + ub[pivot] > threshold {
             let mut bub = vec![0.0; term_iterators.len()];
             term_iterators[0].move_block_max_iterator(current as u32);
             bub[0] = term_iterators[0].get_block_max_score();
@@ -71,22 +71,31 @@ pub fn block_max_max_score(
                 }
             }
 
-            let will_pop = pq.len() >= 20 && score > pq.peek().unwrap().0.0.score;
-            if will_pop {
+            let does_length_exceed = pq.len() >= max_size;
+            if does_length_exceed {
+                let does_score_exceed = score > pq.peek().unwrap().0.0.score;
+                if does_score_exceed {
+                    pq.push(Reverse(FloatDoc(DocData {
+                        docid: current as u32,
+                        score,
+                    })));
+                    pq.pop();
+                    threshold = pq.peek().unwrap().0.0.score;
+                    while pivot < n && ub[pivot] <= threshold {
+                        pivot += 1;
+                    }
+                }
+            } else {
                 pq.push(Reverse(FloatDoc(DocData {
                     docid: current as u32,
                     score,
                 })));
-                threshold = pq.peek().unwrap().0.0.score;
-                while pivot < n && ub[pivot] <= threshold {
-                    pivot += 1;
-                }
             }
         }
         current = next;
     }
 
-    let mut doc_ids = Vec::new();
+    let mut doc_ids = Vec::with_capacity(max_size);
     while !pq.is_empty() {
         if let Some(doc) = pq.pop() {
             doc_ids.push((doc.0.0.docid, doc.0.0.score));

@@ -4,6 +4,7 @@ use rustyline::error::ReadlineError;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
+use std::time::SystemTime;
 
 use crate::compressor::compressor::CompressionAlgorithm;
 use crate::query_processor::retrieval_algorithms::QueryAlgorithm;
@@ -68,9 +69,8 @@ static GLOBAL: MiMalloc = MiMalloc;
 fn main() {
     let mut rl = DefaultEditor::new().unwrap();
 
-    // Load configuration from config.json
     let config_path = "config.json";
-    let mut config = load_config(config_path);
+    let config = load_config(config_path);
 
     println!("\nCurrent Configuration:");
     println!("  Result Directory:      {}", config.result_dir);
@@ -99,7 +99,8 @@ fn main() {
         compression_algo,
         query_algo,
         config.result_dir.clone(),
-    );
+    )
+    .unwrap();
     loop {
         let readline = rl.readline("> ");
 
@@ -115,10 +116,68 @@ fn main() {
                 let command = parts[0];
 
                 match command {
-                    _ => {}
+                    "help" => {
+                        println!("The valid commands are->");
+                        println!("index: Starts building your index ");
+                        println!("save: Saves your index if it has already been built");
+                        println!("load: Loads your previously saved index");
+                        println!(
+                            "query [query string]: Queries your index for the particular query string entered"
+                        );
+                    }
+                    "index" => {
+                        search_engine.build_index().unwrap();
+                        println!("The index has been built")
+                    }
+                    "save" => {
+                        search_engine.save_index().unwrap();
+                        println!("The index has been saved successfully")
+                    }
+                    "load" => {
+                        let start_time = SystemTime::now();
+                        search_engine.load_index().unwrap();
+                        let end_time = SystemTime::now();
+                        // println!("{:?}", end_time.duration_since(start_time).unwrap());
+                        println!(
+                            "The index has been successfully loaded in {} seconds",
+                            end_time.duration_since(start_time).unwrap().as_secs()
+                        );
+                    }
+                    "query" => {
+                        let query_string = parts[1..].join(" ");
+                        let query_results = search_engine.handle_query(query_string).unwrap();
+                        for i in (0..query_results.len()).rev() {
+                            println!(
+                                "{} {} score {}",
+                                query_results[i].0.doc_name,
+                                query_results[i].0.doc_url,
+                                query_results[i].1
+                            )
+                        }
+                    }
+                    "quit" | "exit" => {
+                        println!("Goodbye!");
+                        break;
+                    }
+                    _ => {
+                        println!(
+                            "Invalid command. Type help if you want to see the valid commands"
+                        );
+                    }
                 }
             }
-            Err(_) => {}
+            Err(ReadlineError::Interrupted) => {
+                println!("CTRL-C");
+                break;
+            }
+            Err(ReadlineError::Eof) => {
+                println!("CTRL-D");
+                break;
+            }
+            Err(err) => {
+                println!("Error: {:?}", err);
+                break;
+            }
         }
     }
 }

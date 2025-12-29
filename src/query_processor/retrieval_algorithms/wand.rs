@@ -1,8 +1,3 @@
-use std::collections::BinaryHeap;
-use std::{cmp::Reverse, f32};
-
-use priority_queue::PriorityQueue;
-
 use crate::{
     query_processor::{
         retrieval_algorithms::utils::{DocData, FloatDoc, sort_by_doc_id, swap_down},
@@ -10,6 +5,8 @@ use crate::{
     },
     scoring::bm_25::BM25Params,
 };
+use std::collections::BinaryHeap;
+use std::{cmp::Reverse, f32};
 
 pub fn wand(
     mut term_iterators: Vec<TermIterator>,
@@ -23,23 +20,15 @@ pub fn wand(
     let params = BM25Params::default();
 
     loop {
-        // println!("threshold{}", threshold);
         let mut score: f32 = 0.0;
         let mut pivot = 0;
         while pivot < term_iterators.len() {
             let is_complete = term_iterators[pivot].is_complete();
-            println!(
-                "{} {:?}",
-                is_complete,
-                term_iterators[pivot].get_current_doc_id()
-            );
             if is_complete {
                 break;
             }
-            // println!("{}", term_iterators[pivot].get_max_score());
             score += term_iterators[pivot].get_max_score();
             if score > threshold {
-                println!("{} {}", score, threshold);
                 break;
             }
             pivot += 1;
@@ -73,25 +62,15 @@ pub fn wand(
             threshold = pq.peek().unwrap().0.0.score;
             sort_by_doc_id(&mut term_iterators);
         } else {
-            println!("but why here");
-            // println!("{}", pivot);
-            println!("{}", pq.len());
             while pivot > 0 && term_iterators[pivot].get_current_doc_id() == pivot_id {
                 pivot -= 1;
             }
-
-            println!(
-                "{} {} ",
-                pivot_id,
-                term_iterators[pivot].get_current_doc_id()
-            );
 
             term_iterators[pivot].advance(pivot_id as u32);
             swap_down(&mut term_iterators, pivot);
         }
     }
 
-    println!("size of queue {}", pq.len());
     let mut doc_ids = Vec::with_capacity(pq.len());
     while !pq.is_empty() {
         if let Some(doc) = pq.pop() {

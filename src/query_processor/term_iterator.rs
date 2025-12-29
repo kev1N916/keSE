@@ -28,7 +28,6 @@ impl TermIterator {
         max_score: f32,
         chunk_metadata: Vec<ChunkBlockMaxMetadata>,
     ) -> Self {
-        println!("{}", chunks.len());
         Self {
             term,
             term_id,
@@ -62,9 +61,7 @@ impl TermIterator {
 
     pub fn next(&mut self) -> bool {
         let is_next_element_present = self.chunk_iterator.next();
-        if !is_next_element_present {
-            self.is_complete = true;
-        }
+        self.is_complete = !is_next_element_present;
         is_next_element_present
     }
 
@@ -133,7 +130,7 @@ impl TermIterator {
         self.block_max_iterator.score()
     }
 
-    pub fn get_block_max_last_doc_id(&mut self) -> u32 {
+    pub fn get_block_max_last_doc_id(&mut self) -> u64 {
         self.block_max_iterator.last()
     }
 }

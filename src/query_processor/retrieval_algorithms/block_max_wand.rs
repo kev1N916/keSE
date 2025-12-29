@@ -13,7 +13,8 @@ pub fn block_max_wand(
     doc_lengths: &Vec<u32>,
     average_doc_length: f32,
 ) -> Vec<(u32, f32)> {
-    let mut pq: BinaryHeap<Reverse<FloatDoc>> = BinaryHeap::with_capacity(20);
+    let max_size = 20;
+    let mut pq: BinaryHeap<Reverse<FloatDoc>> = BinaryHeap::with_capacity(max_size);
     let mut threshold = 0.0;
     sort_by_doc_id(&mut term_iterators);
     let params = BM25Params::default();
@@ -22,17 +23,21 @@ pub fn block_max_wand(
         let mut score: f32 = 0.0;
         let mut pivot = 0;
         while pivot < term_iterators.len() {
+            let is_complete = term_iterators[pivot].is_complete();
+            if is_complete {
+                break;
+            }
             score += term_iterators[pivot].get_max_score();
-            pivot += 1;
             if score > threshold {
                 break;
             }
+            pivot += 1;
         }
         if score <= threshold {
             break;
         }
         let pivot_id = term_iterators[pivot].get_current_doc_id();
-        while pivot < term_iterators.len() - 1
+        while pivot + 1 < term_iterators.len()
             && term_iterators[pivot + 1].get_current_doc_id() == pivot_id
         {
             pivot += 1;
@@ -45,8 +50,8 @@ pub fn block_max_wand(
                 .block_max_iterator
                 .advance(pivot_id as u32);
             pivot_score += term_iterators[i].get_block_max_score();
-            if (term_iterators[i].get_block_max_last_doc_id() as u64) < next {
-                next = term_iterators[i].get_block_max_last_doc_id() as u64;
+            if (term_iterators[i].get_block_max_last_doc_id()) < next {
+                next = term_iterators[i].get_block_max_last_doc_id();
             }
         }
         if pivot_score >= threshold {
@@ -78,6 +83,9 @@ pub fn block_max_wand(
                     docid: pivot_id as u32,
                     score,
                 })));
+                if pq.len() > max_size {
+                    pq.pop();
+                }
                 threshold = pq.peek().unwrap().0.0.score;
                 sort_by_doc_id(&mut term_iterators);
             } else {
@@ -89,7 +97,7 @@ pub fn block_max_wand(
             }
         } else {
             while pivot < term_iterators.len() - 1
-                && next > term_iterators[pivot].get_current_doc_id()
+                && next > term_iterators[pivot + 1].get_current_doc_id()
             {
                 next = term_iterators[pivot + 1].get_current_doc_id();
             }
@@ -101,7 +109,7 @@ pub fn block_max_wand(
             swap_down(&mut term_iterators, pivot);
         }
     }
-    let mut doc_ids = Vec::new();
+    let mut doc_ids = Vec::with_capacity(max_size);
     while !pq.is_empty() {
         if let Some(doc) = pq.pop() {
             doc_ids.push((doc.0.0.docid, doc.0.0.score));
