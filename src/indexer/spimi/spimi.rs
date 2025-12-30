@@ -18,6 +18,7 @@ use crate::{
     utils::{
         chunk_block_max_metadata::ChunkBlockMaxMetadata,
         dictionary::Dictionary,
+        paths::get_inverted_index_path,
         posting::{Posting, merge_all_postings},
         term::Term,
     },
@@ -31,14 +32,14 @@ use crate::{
 // Since the dictionaries are sorted before writing to the disk performing a merge is easy.
 pub struct Spimi {
     dictionary: Dictionary,
-    result_directory_path: String,
+    index_directory_path: String,
 }
 
 impl Spimi {
-    pub fn new(result_directory_path: String) -> Self {
+    pub fn new(index_directory_path: String) -> Self {
         Self {
             dictionary: Dictionary::new(),
-            result_directory_path,
+            index_directory_path,
         }
     }
 
@@ -50,7 +51,7 @@ impl Spimi {
         rx: mpsc::Receiver<Vec<Term>>,
     ) -> Result<(), std::io::Error> {
         let mut spmi_index = 0;
-        let path = Path::new(&self.result_directory_path);
+        let path = Path::new(&self.index_directory_path);
 
         while let Ok(terms) = rx.recv() {
             for term in terms {
@@ -84,7 +85,7 @@ impl Spimi {
         &mut self,
         l_avg: f32,
         include_positions: bool,
-        document_lengths: &Vec<u32>,
+        document_lengths: &Box<[u32]>,
         compression_algorithm: CompressionAlgorithm,
         chunk_size: u8,
     ) -> Result<InMemoryIndexMetadata, io::Error> {
@@ -93,17 +94,16 @@ impl Spimi {
 
         // Iterators are created over our temporary index files
         let mut merge_iterators =
-            SpimiIterator::scan_and_create_iterators(&self.result_directory_path)?;
+            SpimiIterator::scan_and_create_iterators(&self.index_directory_path)?;
         if merge_iterators.is_empty() {
             return Ok(in_memory_index_metadata);
         }
-        in_memory_index_metadata.no_of_docs = document_lengths.len() as u32;
         let mut no_of_terms: u32 = 0;
-        let path = Path::new(&self.result_directory_path);
-        let final_index_file = File::create(path.join("inverted_index.idx").as_path())?;
+        let path = Path::new(&self.index_directory_path);
+        let final_index_file = File::create(get_inverted_index_path(path).as_path())?;
 
         // The index writer is used to efficiently create our inverted index
-        let mut index_merge_writer: SpimiMergeWriter = SpimiMergeWriter::new(
+        let mut spimi_merge_writer: SpimiMergeWriter = SpimiMergeWriter::new(
             final_index_file,
             Some(chunk_size),
             None,
@@ -112,6 +112,7 @@ impl Spimi {
         );
         // The BM25 scoring params are created.
         let bm25_params = BM25Params::default();
+        let no_of_docs = document_lengths.len() as u32;
         loop {
             // We iterate over our iterators to find the smallest term
             // Since the size of the vector is quite small I have chosen to just loop over it.
@@ -158,16 +159,9 @@ impl Spimi {
             for posting in &final_merged {
                 let f_dt = posting.positions.len() as u32;
                 let l_d = document_lengths[(posting.doc_id - 1) as usize];
-                // let l_d = 200;
                 // We compute the contribution of this document to the term_score
-                let term_score: f32 = compute_term_score(
-                    f_dt,
-                    l_d,
-                    l_avg,
-                    in_memory_index_metadata.no_of_docs,
-                    term_frequency,
-                    &bm25_params,
-                );
+                let term_score: f32 =
+                    compute_term_score(f_dt, l_d, l_avg, no_of_docs, term_frequency, &bm25_params);
                 // The document may contribute to the max_term_score
                 max_term_score = max_term_score.max(term_score);
 
@@ -175,24 +169,24 @@ impl Spimi {
                 // after the chunk is completed
                 chunk_max_term_score = chunk_max_term_score.max(term_score);
                 if (chunk_index + 1) % chunk_size as usize == 0 {
-                    chunk_metadata.push(ChunkBlockMaxMetadata {
-                        chunk_last_doc_id: posting.doc_id,
+                    chunk_metadata.push(ChunkBlockMaxMetadata::new(
+                        posting.doc_id,
                         chunk_max_term_score,
-                    });
+                    ));
                     chunk_max_term_score = f32::MIN;
                 }
                 chunk_index += 1;
             }
             if chunk_max_term_score != f32::MIN {
-                chunk_metadata.push(ChunkBlockMaxMetadata {
-                    chunk_last_doc_id: final_merged[term_frequency as usize - 1].doc_id,
+                chunk_metadata.push(ChunkBlockMaxMetadata::new(
+                    final_merged[term_frequency as usize - 1].doc_id,
                     chunk_max_term_score,
-                });
+                ));
             }
 
             chunk_metadata.shrink_to_fit();
 
-            let block_ids = index_merge_writer
+            let block_ids = spimi_merge_writer
                 .add_term(no_of_terms, final_merged)
                 .unwrap();
 
@@ -207,11 +201,11 @@ impl Spimi {
             // in_memory_index.add_term_to_bk_tree(term);
         }
         // We close the index_merge_writer so that the remaining terms can be written to the disk.
-        index_merge_writer.close()?;
+        spimi_merge_writer.close()?;
         in_memory_index_metadata.close();
 
         // We keep track of total no of blocks and total no of terms
-        in_memory_index_metadata.no_of_blocks = index_merge_writer.current_block_no;
+        in_memory_index_metadata.no_of_blocks = spimi_merge_writer.current_block_no;
         in_memory_index_metadata.no_of_terms = no_of_terms;
         let now_time = SystemTime::now();
         println!(

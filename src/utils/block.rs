@@ -57,9 +57,6 @@ impl Block {
     pub fn set_block_id(&mut self, block_id: u32) {
         self.block_id = block_id;
     }
-    pub fn set_no_of_terms(&mut self, no_of_terms: u32) {
-        self.no_of_terms = no_of_terms;
-    }
 
     // when we add a term we also add the the term offset which is basically the current length of
     // chunk_bytes,which is where the chunks of that term will start
@@ -69,20 +66,20 @@ impl Block {
         self.term_offsets.push(self.chunk_bytes.len() as u16);
     }
 
-    pub fn get_chunk_for_doc<'a>(&self, doc_id: u32, chunks: &'a [Chunk]) -> Option<&'a Chunk> {
-        let mut i = 0;
-        while i < chunks.len() {
-            if chunks[i].max_doc_id < doc_id {
-                i += 1;
-            } else {
-                break;
-            }
-        }
-        if i == chunks.len() {
-            return None;
-        }
-        Some(&chunks[i])
-    }
+    // pub fn get_chunk_for_doc<'a>(&self, doc_id: u32, chunks: &'a [Chunk]) -> Option<&'a Chunk> {
+    //     let mut i = 0;
+    //     while i < chunks.len() {
+    //         if chunks[i].max_doc_id < doc_id {
+    //             i += 1;
+    //         } else {
+    //             break;
+    //         }
+    //     }
+    //     if i == chunks.len() {
+    //         return None;
+    //     }
+    //     Some(&chunks[i])
+    // }
 
     // since max_block_size is in kb, multiply by 1000
     pub fn space_left(&self) -> u32 {

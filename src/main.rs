@@ -13,7 +13,7 @@ use crate::search_engine::search_engine::SearchEngine;
 mod compressor;
 mod in_memory_index_metadata;
 mod indexer;
-mod query_parser;
+mod parser;
 mod scoring;
 mod search_engine;
 mod utils;
@@ -21,8 +21,8 @@ mod utils;
 mod query_processor;
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct Config {
-    result_dir: String,
     index_dir: String,
+    dataset_dir: String,
     query_algo: String,
     compression_algo: String,
 }
@@ -30,8 +30,8 @@ struct Config {
 impl Default for Config {
     fn default() -> Self {
         Config {
-            result_dir: "./results".to_string(),
-            index_dir: "./index".to_string(),
+            index_dir: "index".to_string(),
+            dataset_dir: "wikipedia".to_string(),
             query_algo: "wand".to_string(),
             compression_algo: "simple16".to_string(),
         }
@@ -73,8 +73,8 @@ fn main() {
     let config = load_config(config_path);
 
     println!("\nCurrent Configuration:");
-    println!("  Result Directory:      {}", config.result_dir);
-    println!("  Index Directory:       {}", config.index_dir);
+    println!("  Index Directory:      {}", config.index_dir);
+    println!("  Dataset Directory:       {}", config.dataset_dir);
     println!("  Query Algorithm:       {}", config.query_algo);
     println!("  Compression Algorithm: {}", config.compression_algo);
     println!("\nWelcome to my CLI! Type 'help' for commands or 'exit' to quit.\n");
@@ -95,10 +95,10 @@ fn main() {
         _ => QueryAlgorithm::Wand,
     };
     let mut search_engine = SearchEngine::new(
-        config.index_dir.clone(),
+        config.dataset_dir,
         compression_algo,
         query_algo,
-        config.result_dir.clone(),
+        config.index_dir,
     )
     .unwrap();
     loop {
@@ -128,6 +128,45 @@ fn main() {
                     "index" => {
                         search_engine.build_index().unwrap();
                         println!("The index has been built")
+                    }
+                    "merge" => {
+                        search_engine.merge_spimi_files().unwrap();
+                        println!("The index has been built")
+                    }
+                    "metadata" => {
+                        let metadata = search_engine.get_index_metadata();
+                        println!(
+                            "The size of the inverted index is {:?}",
+                            metadata.size_of_index
+                        );
+                        println!(
+                            "The number of indexed documents is {:?}",
+                            metadata.no_of_docs
+                        );
+                        println!(
+                            "The number of terms in the index is {:?}",
+                            metadata.no_of_terms
+                        );
+                        println!(
+                            "The number of blocks occupied by the index is {:?}",
+                            metadata.no_of_blocks
+                        );
+                        println!(
+                            "The compression algorithm used by the index is {:?}",
+                            metadata.compression_algorithm
+                        );
+                        println!(
+                            "The query algorithm used by the index is {:?}",
+                            metadata.query_algorithm
+                        );
+                        println!(
+                            "The index directory path is {:?}",
+                            metadata.dataset_directory_path
+                        );
+                        println!(
+                            "The index directory path is {:?}",
+                            metadata.index_directory_path
+                        );
                     }
                     "save" => {
                         search_engine.save_index().unwrap();

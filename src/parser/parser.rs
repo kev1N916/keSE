@@ -20,7 +20,7 @@ const STOP_WORDS: &[&str] = &[
 ];
 
 #[derive(Debug, Clone)]
-pub struct SearchTokenizer {
+pub struct Parser {
     stop_word_set: HashSet<String>,
 }
 
@@ -41,15 +41,15 @@ pub struct TokenizeQueryResult {
     pub unigram: Vec<Token>,
 }
 
-impl SearchTokenizer {
-    pub fn new() -> Result<SearchTokenizer, io::Error> {
+impl Parser {
+    pub fn new() -> Result<Parser, io::Error> {
         let stop_word_set: HashSet<String> = STOP_WORDS.iter().map(|&s| s.to_string()).collect();
-        Ok(SearchTokenizer { stop_word_set })
+        Ok(Parser { stop_word_set })
     }
 
     pub fn tokenize_query(
         &self,
-        sentences: &str, // Changed from &String to &str
+        sentences: &str,
     ) -> Result<TokenizeQueryResult, TokenizationError> {
         if sentences.trim().is_empty() {
             return Err(TokenizationError::EmptyInput);
@@ -113,7 +113,7 @@ mod tests {
 
     #[test]
     fn test_new_tokenizer_creation() {
-        let result = SearchTokenizer::new();
+        let result = Parser::new();
         assert!(result.is_ok(), "Should successfully create tokenizer");
     }
 

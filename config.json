@@ -1,6 +1,6 @@
 {
-  "result_dir": "index_run_2",
-  "index_dir": "wikipedia",
+  "index_dir": "index_run_2",
+  "dataset_dir": "wikipedia",
   "compression_algo": "simple16",
   "query_algo": "bmms"
 }

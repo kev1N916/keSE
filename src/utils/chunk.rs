@@ -54,30 +54,32 @@ impl Chunk {
         self.no_of_postings = 0;
     }
 
-    pub fn get_doc_ids(&self) -> Vec<u32> {
-        if self.compressed_doc_ids.len() > 0 {
-            let mut doc_ids = self
-                .compressor
-                .decompress_list_with_dgaps(&self.compressed_doc_ids);
-            doc_ids.truncate(self.no_of_postings as usize);
-            return doc_ids;
-        }
-        self.doc_ids.clone()
-    }
+    // pub fn get_doc_ids(&mut self) -> &[u32] {
+    //     if self.compressed_doc_ids.len() > 0 {
+    //         let mut doc_ids = self
+    //             .compressor
+    //             .decompress_list_with_dgaps(&self.compressed_doc_ids);
+    //         doc_ids.truncate(self.no_of_postings as usize);
+    //         self.doc_ids = doc_ids;
+    //         self.compressed_doc_ids.clear();
+    //     }
+    //     self.doc_ids.as_slice()
+    // }
+    //
+    //  // pub fn get_doc_frequencies(&mut self) -> &Vec<u32> {
+    //     if self.compressed_doc_frequencies.len() > 0 {
+    //         let mut doc_freq = self
+    //             .compressor
+    //             .decompress_list(&self.compressed_doc_frequencies);
+    //         doc_freq.truncate(self.no_of_postings as usize);
+    //         self.doc_frequencies = doc_freq;
+    //         self.compressed_doc_frequencies.clear();
+    //     }
+    //     &self.doc_frequencies
+    // }
 
     pub fn get_no_of_postings(&self) -> u8 {
         self.no_of_postings
-    }
-
-    pub fn get_doc_frequencies(&self) -> Vec<u32> {
-        if self.compressed_doc_frequencies.len() > 0 {
-            let mut doc_freq = self
-                .compressor
-                .decompress_list(&self.compressed_doc_frequencies);
-            doc_freq.truncate(self.no_of_postings as usize);
-            return doc_freq;
-        }
-        self.doc_frequencies.clone()
     }
 
     pub fn get_posting_list(&self, index: usize) -> Vec<u32> {
@@ -271,11 +273,12 @@ mod tests {
 
         let mut decoded_chunk = Chunk::new(1, CompressionAlgorithm::VarByte);
         decoded_chunk.decode(&encoded[4..]);
+        decoded_chunk.decode_doc_ids();
         decoded_chunk.decode_doc_frequencies();
         assert_eq!(decoded_chunk.no_of_postings, 1);
         assert_eq!(decoded_chunk.max_doc_id, 100);
-        assert_eq!(decoded_chunk.get_doc_ids(), vec![100]);
-        assert_eq!(decoded_chunk.get_doc_frequencies(), vec![5]);
+        assert_eq!(decoded_chunk.doc_ids, vec![100]);
+        assert_eq!(decoded_chunk.doc_frequencies, vec![5]);
         assert_eq!(decoded_chunk.get_posting_list(0), vec![1, 5, 10, 15, 20]);
     }
 
@@ -327,11 +330,12 @@ mod tests {
 
         let mut decoded_chunk = Chunk::new(1, CompressionAlgorithm::Simple9);
         decoded_chunk.decode(&encoded[4..]);
-
+        decoded_chunk.decode_doc_frequencies();
+        decoded_chunk.decode_doc_ids();
         assert_eq!(decoded_chunk.no_of_postings, 2);
         assert_eq!(decoded_chunk.max_doc_id, 200);
-        assert_eq!(decoded_chunk.get_doc_ids(), vec![100, 200]);
-        assert_eq!(decoded_chunk.get_doc_frequencies(), vec![5, 3]);
+        assert_eq!(decoded_chunk.doc_ids, vec![100, 200]);
+        assert_eq!(decoded_chunk.doc_frequencies, vec![5, 3]);
         assert!(decoded_chunk.indexed_compressed_positions.is_empty());
     }
 
@@ -351,10 +355,11 @@ mod tests {
 
         let mut decoded_chunk = Chunk::new(1, CompressionAlgorithm::VarByte);
         decoded_chunk.decode(&encoded[4..]);
+        decoded_chunk.decode_doc_ids();
         decoded_chunk.decode_doc_frequencies();
 
-        assert_eq!(decoded_chunk.get_doc_ids(), vec![1000000, 2000000]);
-        assert_eq!(decoded_chunk.get_doc_frequencies(), vec![100, 200]);
+        assert_eq!(decoded_chunk.doc_ids, vec![1000000, 2000000]);
+        assert_eq!(decoded_chunk.doc_ids, vec![100, 200]);
         assert_eq!(
             decoded_chunk.get_posting_list(0),
             vec![100, 200, 300, 400, 500]
@@ -415,12 +420,12 @@ mod tests {
         let mut decoded = Chunk::new(1, CompressionAlgorithm::VarByte);
         decoded.decode(&encoded[4..]);
         decoded.decode_doc_frequencies();
-
+        decoded.decode_doc_ids();
         // Verify all data matches
         assert_eq!(decoded.no_of_postings, original.no_of_postings);
         assert_eq!(decoded.max_doc_id, original.max_doc_id);
-        assert_eq!(decoded.get_doc_ids(), original.doc_ids);
-        assert_eq!(decoded.get_doc_frequencies(), original.doc_frequencies);
+        assert_eq!(decoded.doc_ids, original.doc_ids);
+        assert_eq!(decoded.doc_frequencies, original.doc_frequencies);
 
         for i in 0..original.doc_positions.len() {
             assert_eq!(decoded.get_posting_list(i), original.doc_positions[i]);

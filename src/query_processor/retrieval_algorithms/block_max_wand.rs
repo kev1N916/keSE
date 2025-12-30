@@ -10,7 +10,7 @@ use crate::scoring::bm_25::BM25Params;
 
 pub fn block_max_wand(
     mut term_iterators: Vec<TermIterator>,
-    doc_lengths: &Vec<u32>,
+    doc_lengths: &Box<[u32]>,
     average_doc_length: f32,
 ) -> Vec<(u32, f32)> {
     let max_size = 20;

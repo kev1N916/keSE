@@ -1,9 +1,6 @@
 use std::cmp::Ordering;
 
-use crate::{
-    query_processor::term_iterator::TermIterator,
-    utils::chunk_block_max_metadata::ChunkBlockMaxMetadata,
-};
+use crate::query_processor::term_iterator::TermIterator;
 
 #[derive(Debug, PartialEq)]
 pub struct DocData {
@@ -36,9 +33,8 @@ pub fn sort_by_doc_id(term_iterators: &mut Vec<TermIterator>) {
 }
 pub fn swap_down(term_iterators: &mut Vec<TermIterator>, pivot: usize) {
     let mut temp = pivot;
-    while (temp + 1 < term_iterators.len()
-        && term_iterators[temp].get_current_doc_id()
-            > term_iterators[temp + 1].get_current_doc_id())
+    while temp + 1 < term_iterators.len()
+        && term_iterators[temp].get_current_doc_id() > term_iterators[temp + 1].get_current_doc_id()
     {
         term_iterators.swap(temp, temp + 1);
         temp += 1;

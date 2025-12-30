@@ -13,3 +13,15 @@ pub enum QueryAlgorithm {
     MaxScore,
     Boolean,
 }
+
+impl QueryAlgorithm {
+    pub fn to_string(&self) -> String {
+        match self {
+            QueryAlgorithm::BlockMaxMaxScore => String::from("Block Max Max Score (BMMS)"),
+            QueryAlgorithm::BlockMaxWand => String::from("Block Max Wand (BMW)"),
+            QueryAlgorithm::Wand => String::from("WAND"),
+            QueryAlgorithm::Boolean => String::from("Boolean"),
+            QueryAlgorithm::MaxScore => String::from("Max Score (MS)"),
+        }
+    }
+}

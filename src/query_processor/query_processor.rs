@@ -1,8 +1,7 @@
 use std::{
-    collections::HashSet,
     fs::File,
     io::{self, BufReader},
-    path::Path,
+    path::PathBuf,
     u32,
 };
 
@@ -18,11 +17,12 @@ use crate::{
         },
         term_iterator::TermIterator,
     },
-    utils::{block::Block, in_memory_term_metadata::InMemoryTermMetadata},
+    utils::{
+        block::Block, in_memory_term_metadata::InMemoryTermMetadata, paths::get_inverted_index_path,
+    },
 };
 
 pub struct QueryProcessor {
-    result_directory_path: String,
     block_cache: CacheType<u32, Block>,
     inverted_index_file: File,
     compression_algorithm: CompressionAlgorithm,
@@ -31,15 +31,14 @@ pub struct QueryProcessor {
 
 impl QueryProcessor {
     pub fn new(
-        result_directory_path: String,
+        index_directory_path: PathBuf,
         compression_algorithm: CompressionAlgorithm,
         query_algorithm: QueryAlgorithm,
     ) -> io::Result<Self> {
-        let inverted_index_path = Path::new(&result_directory_path).join("inverted_index.idx");
+        let inverted_index_path = get_inverted_index_path(index_directory_path.clone());
         let inverted_index_file = File::open(inverted_index_path)?;
 
         Ok(Self {
-            result_directory_path,
             block_cache: CacheType::new_lfu(1000),
             inverted_index_file,
             compression_algorithm,
@@ -47,57 +46,11 @@ impl QueryProcessor {
         })
     }
 
-    fn get_doc_ids_for_term(&mut self, block_ids: &[u32], term_id: u32) -> HashSet<u32> {
-        let mut reader: BufReader<&mut File> = BufReader::new(&mut self.inverted_index_file);
-
-        let mut doc_ids = HashSet::new();
-        for i in 0..block_ids.len() {
-            let mut block = Block::new(block_ids[i], None);
-            block.decode(&mut reader).unwrap();
-            let term_index = block.check_if_term_exists(term_id);
-            let chunks = block.decode_chunks_for_term(
-                term_id,
-                term_index as usize,
-                self.compression_algorithm.clone(),
-            );
-            for chunk in chunks {
-                doc_ids.extend(&mut chunk.get_doc_ids().into_iter());
-            }
-        }
-        doc_ids
-    }
-
-    fn intersect(&mut self, block_ids: &[u32], term_id: u32, doc_ids: &mut HashSet<u32>) {
-        let mut reader: BufReader<&mut File> = BufReader::new(&mut self.inverted_index_file);
-        for i in 0..block_ids.len() {
-            let mut block = Block::new(block_ids[i], None);
-            block.decode(&mut reader).unwrap();
-            let term_index = block.check_if_term_exists(term_id);
-            if term_index == -1 {
-                continue;
-            }
-            let chunks = block.decode_chunks_for_term(
-                term_id,
-                term_index as usize,
-                self.compression_algorithm.clone(),
-            );
-
-            doc_ids.retain(|doc_id| {
-                if let Some(chunk) = block.get_chunk_for_doc(*doc_id, &chunks) {
-                    let chunk_doc_ids = chunk.get_doc_ids();
-                    chunk_doc_ids.contains(&doc_id)
-                } else {
-                    false // Remove if chunk not found
-                }
-            });
-        }
-    }
-
     pub fn process_query(
         &mut self,
         query_terms: Vec<String>,
         query_metadata: Vec<InMemoryTermMetadata>,
-        document_lengths: &Vec<u32>,
+        document_lengths: &Box<[u32]>,
         average_document_length: f32,
     ) -> Vec<(u32, f32)> {
         let mut term_iterators: Vec<TermIterator> = Vec::with_capacity(query_terms.len());

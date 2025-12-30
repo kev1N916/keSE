@@ -16,7 +16,6 @@ use crate::{
 // term_max_scores,term_frequencies and term_block_max_metadata are needed for query processing
 pub struct InMemoryIndexMetadata {
     pub no_of_blocks: u32,
-    pub no_of_docs: u32,  // no of documents in the collection
     pub no_of_terms: u32, // no of terms in the collection
     pub bk_tree: BkTree,
     term_frequencies: Vec<u32>,
@@ -36,7 +35,6 @@ impl InMemoryIndexMetadata {
     pub fn new() -> Self {
         Self {
             no_of_blocks: 0,
-            no_of_docs: 0,
             no_of_terms: 0,
             bk_tree: BkTree::new(),
             term_to_id_map: HashMap::with_capacity(6_000_000),
@@ -61,7 +59,6 @@ impl InMemoryIndexMetadata {
         );
 
         writer.write_all(&self.no_of_blocks.to_le_bytes())?;
-        writer.write_all(&self.no_of_docs.to_le_bytes())?;
         writer.write_all(&self.no_of_terms.to_le_bytes())?;
 
         writer.write_all(&(self.term_frequencies.len() as u32).to_le_bytes())?;
@@ -97,9 +94,6 @@ impl InMemoryIndexMetadata {
         let mut buf = [0u8; 4];
         reader.read_exact(&mut buf)?;
         self.no_of_blocks = u32::from_le_bytes(buf);
-
-        reader.read_exact(&mut buf)?;
-        self.no_of_docs = u32::from_le_bytes(buf);
 
         reader.read_exact(&mut buf)?;
         self.no_of_terms = u32::from_le_bytes(buf);
@@ -201,14 +195,17 @@ impl InMemoryIndexMetadata {
         if term_id == 0 {
             return None;
         }
-
-        Some(InMemoryTermMetadata {
-            term_id: self.get_term_id(term),
-            term_frequency: self.get_term_frequency(term_id),
-            max_score: self.get_max_term_score(term_id),
-            block_ids: self.get_block_ids(term_id),
-            chunk_block_max_metadata: self.get_chunk_block_max_metadata(term_id),
-        })
+        let term_frequency = self.get_term_frequency(term_id);
+        let max_score = self.get_max_term_score(term_id);
+        let block_ids = self.get_block_ids(term_id);
+        let chunk_block_max_metadata = self.get_chunk_block_max_metadata(term_id);
+        Some(InMemoryTermMetadata::new(
+            term_id,
+            term_frequency,
+            max_score,
+            block_ids,
+            chunk_block_max_metadata,
+        ))
     }
 
     pub fn get_all_terms(&self) -> Vec<&str> {
@@ -296,7 +293,6 @@ mod tests {
     fn test_new_creates_empty_index() {
         let index = InMemoryIndexMetadata::new();
 
-        assert_eq!(index.no_of_docs, 0);
         assert_eq!(index.no_of_terms, 0);
         assert_eq!(index.get_all_terms().len(), 0);
     }

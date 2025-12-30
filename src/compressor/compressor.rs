@@ -10,24 +10,13 @@ pub enum CompressionAlgorithm {
 }
 
 impl CompressionAlgorithm {
-    pub fn to_byte(&self) -> u8 {
+    pub fn to_string(&self) -> String {
         match self {
-            CompressionAlgorithm::Simple9 => 0,
-            CompressionAlgorithm::Simple16 => 1,
-            CompressionAlgorithm::PforDelta => 2,
-            CompressionAlgorithm::RiceCoding => 3,
-            CompressionAlgorithm::VarByte => 4,
-        }
-    }
-
-    pub fn from_byte(byte: u8) -> Result<Self, String> {
-        match byte {
-            0 => Ok(CompressionAlgorithm::Simple9),
-            1 => Ok(CompressionAlgorithm::Simple16),
-            2 => Ok(CompressionAlgorithm::PforDelta),
-            3 => Ok(CompressionAlgorithm::RiceCoding),
-            4 => Ok(CompressionAlgorithm::VarByte),
-            _ => Err(format!("Invalid compression algorithm byte: {}", byte)),
+            CompressionAlgorithm::Simple9 => String::from("Simple9"),
+            CompressionAlgorithm::Simple16 => String::from("Simple16"),
+            CompressionAlgorithm::PforDelta => String::from("PforDelta"),
+            CompressionAlgorithm::RiceCoding => String::from("RiceCoding"),
+            CompressionAlgorithm::VarByte => String::from("VarByte"),
         }
     }
 }
@@ -127,8 +116,7 @@ impl Compressor {
                 return Self::reconstruct_list_from_d_gap_encoding(list[0..index].to_vec());
             }
             CompressionAlgorithm::RiceCoding => {
-                // return transform_list_to_difference_encoding(rice::decompress(list));
-                Vec::new()
+                return Self::reconstruct_list_from_d_gap_encoding(rice::decompress(list).unwrap());
             }
             CompressionAlgorithm::VarByte => {
                 return Self::reconstruct_list_from_d_gap_encoding(var_byte::decompress(list));
@@ -180,8 +168,7 @@ impl Compressor {
                 list[0..index].to_vec()
             }
             CompressionAlgorithm::RiceCoding => {
-                // return transform_list_to_difference_encoding(rice::decompress(list));
-                Vec::new()
+                return rice::decompress(list).unwrap();
             }
             CompressionAlgorithm::VarByte => {
                 return var_byte::decompress(list);

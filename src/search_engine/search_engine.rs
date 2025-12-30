@@ -1,7 +1,7 @@
 use std::{
     fs::{self, File},
     io::{self, BufReader, BufWriter, Error, ErrorKind},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use search_engine_cache::CacheType;
@@ -9,44 +9,48 @@ use search_engine_cache::CacheType;
 use crate::{
     compressor::compressor::CompressionAlgorithm,
     in_memory_index_metadata::in_memory_index_metadata::InMemoryIndexMetadata,
-    indexer::indexer::{DocumentMetadata, Indexer},
-    query_parser::tokenizer::SearchTokenizer,
+    indexer::indexer::Indexer,
+    parser::parser::Parser,
     query_processor::{query_processor::QueryProcessor, retrieval_algorithms::QueryAlgorithm},
+    utils::{
+        paths::{get_inverted_index_path, get_save_doc_metadata_path, get_save_term_metadata_path},
+        types::{DocumentMetadata, SearchEngineMetadata},
+    },
 };
 
 pub struct SearchEngine {
     query_cache: CacheType<String, Vec<(u32, f32)>>,
     query_processor: QueryProcessor,
-    query_parser: SearchTokenizer,
+    parser: Parser,
     indexer: Indexer,
     in_memory_index_metadata: InMemoryIndexMetadata,
     compression_algorithm: CompressionAlgorithm,
     query_algorithm: QueryAlgorithm,
-    index_directory_path: String,
-    result_directory_path: String,
+    dataset_directory_path: PathBuf,
+    index_directory_path: PathBuf,
 }
 
 impl SearchEngine {
     pub fn new(
-        index_directory_path: String,
+        dataset_directory_path: String,
         compression_algorithm: CompressionAlgorithm,
         query_algorithm: QueryAlgorithm,
-        result_directory_path: String,
+        index_directory_path: String,
     ) -> Result<Self, Error> {
-        let index_path = Path::new(&index_directory_path);
-        if !index_path.exists() || !index_path.is_dir() {
+        let dataset_path = Path::new(&dataset_directory_path).to_path_buf();
+        if !dataset_path.exists() || !dataset_path.is_dir() {
             return Err(Error::new(
                 ErrorKind::Other,
                 "index directory path does not exist, please initialize it ",
             ));
         }
-        let result_path = Path::new(&result_directory_path);
-        if !result_path.exists() {
-            fs::create_dir_all(result_path).unwrap();
-        } else if result_path.is_file() {
-            fs::create_dir_all(result_path).unwrap();
+        let index_path = Path::new(&index_directory_path).to_path_buf();
+        if !index_path.exists() {
+            fs::create_dir_all(index_path.clone()).unwrap();
+        } else if index_path.is_file() {
+            fs::create_dir_all(index_path.clone()).unwrap();
         }
-        let inverted_index_path = Path::new(&result_directory_path).join("inverted_index.idx");
+        let inverted_index_path = get_inverted_index_path(index_directory_path);
         if !inverted_index_path.exists() {
             if let Err(e) = File::create_new(inverted_index_path) {
                 if e.kind() != ErrorKind::AlreadyExists {
@@ -57,34 +61,34 @@ impl SearchEngine {
                 }
             }
         }
-        let query_parser = SearchTokenizer::new()?;
+        let parser = Parser::new()?;
         let mut indexer = Indexer::new(
-            query_parser.clone(),
+            parser.clone(),
             compression_algorithm.clone(),
-            result_directory_path.clone(),
+            index_path.clone(),
         )?;
 
-        indexer.set_index_directory_path(index_directory_path.clone());
+        indexer.set_dataset_directory_path(dataset_path.clone());
         let query_processor = QueryProcessor::new(
-            result_directory_path.clone(),
+            index_path.clone(),
             compression_algorithm.clone(),
             query_algorithm.clone(),
         )?;
 
         Ok(Self {
-            query_cache: CacheType::new_landlord(1000),
+            query_cache: CacheType::new_landlord(10000),
             query_processor,
-            query_parser,
+            parser,
             in_memory_index_metadata: InMemoryIndexMetadata::new(),
             indexer,
             compression_algorithm,
             query_algorithm,
-            index_directory_path,
-            result_directory_path,
+            dataset_directory_path: dataset_path,
+            index_directory_path: index_path,
         })
     }
 
-    fn merge_spimi_files(&mut self) -> io::Result<()> {
+    pub fn merge_spimi_files(&mut self) -> io::Result<()> {
         self.in_memory_index_metadata = self.indexer.merge_spimi_files()?;
         Ok(())
     }
@@ -94,7 +98,7 @@ impl SearchEngine {
     }
 
     pub fn load_document_metadata(&mut self) -> io::Result<()> {
-        let doc_save_path = Path::new(&self.result_directory_path).join("document_metadata.sidx");
+        let doc_save_path = get_save_doc_metadata_path(Path::new(&self.index_directory_path));
         if !doc_save_path.as_path().exists() {
             return Err(Error::new(
                 ErrorKind::InvalidFilename,
@@ -108,7 +112,7 @@ impl SearchEngine {
     }
 
     pub fn load_term_metadata(&mut self) -> io::Result<()> {
-        let term_save_path = Path::new(&self.result_directory_path).join("term_metadata.sidx");
+        let term_save_path = get_save_term_metadata_path(Path::new(&self.index_directory_path));
         if !term_save_path.as_path().exists() {
             return Err(Error::new(
                 ErrorKind::InvalidFilename,
@@ -121,23 +125,17 @@ impl SearchEngine {
         Ok(())
     }
 
-    pub fn load_index(&mut self) -> io::Result<()> {
-        self.load_document_metadata()?;
-        self.load_term_metadata()?;
-        Ok(())
-    }
-
     pub fn save_document_metadata(&mut self) -> io::Result<()> {
-        let doc_save_path = Path::new(&self.result_directory_path).join("document_metadata.sidx");
-        let file = File::create(&doc_save_path.as_path())?;
+        let doc_save_path = get_save_doc_metadata_path(Path::new(&self.index_directory_path));
+        let file = File::create(&doc_save_path)?;
         let doc_writer = BufWriter::new(file);
         self.indexer.save_document_metadata(doc_writer)?;
         Ok(())
     }
 
     pub fn save_term_metadata(&mut self) -> io::Result<()> {
-        let term_save_path = Path::new(&self.result_directory_path).join("term_metadata.sidx");
-        let file = File::create(&term_save_path.as_path())?;
+        let term_save_path = get_save_term_metadata_path(Path::new(&self.index_directory_path));
+        let file = File::create(&term_save_path)?;
         let term_writer = BufWriter::new(file);
         self.in_memory_index_metadata
             .save_term_metadata(term_writer)?;
@@ -150,19 +148,57 @@ impl SearchEngine {
         Ok(())
     }
 
-    pub fn set_index_directory_path(&mut self, index_directory_path: String) {
+    pub fn load_index(&mut self) -> io::Result<()> {
+        self.load_document_metadata()?;
+        self.load_term_metadata()?;
+        Ok(())
+    }
+
+    pub fn set_dataset_directory_path(&mut self, dataset_directory_path: PathBuf) {
+        self.dataset_directory_path = dataset_directory_path;
+    }
+    pub fn get_dataset_directory_path(&self) -> &str {
+        &self.dataset_directory_path.as_os_str().to_str().unwrap()
+    }
+
+    pub fn set_index_directory_path(&mut self, index_directory_path: PathBuf) {
         self.index_directory_path = index_directory_path;
     }
-
-    pub fn set_result_directory_path(&mut self, result_directory_path: String) {
-        self.result_directory_path = result_directory_path;
-    }
-    pub fn get_result_directory_path(&self) -> &String {
-        &self.result_directory_path
+    pub fn get_index_directory_path(&self) -> &str {
+        &self.index_directory_path.as_os_str().to_str().unwrap()
     }
 
-    pub fn compression_algorithm(&self) -> &CompressionAlgorithm {
+    pub fn set_compression_algorithm(&mut self, compression_algorithm: CompressionAlgorithm) {
+        self.compression_algorithm = compression_algorithm;
+    }
+
+    pub fn get_compression_algorithm(&self) -> &CompressionAlgorithm {
         &self.compression_algorithm
+    }
+
+    pub fn set_query_algorithm(&mut self, query_algorithm: QueryAlgorithm) {
+        self.query_algorithm = query_algorithm;
+    }
+
+    pub fn get_query_algorithm(&self) -> &QueryAlgorithm {
+        &self.query_algorithm
+    }
+
+    pub fn get_index_metadata(&self) -> SearchEngineMetadata {
+        let size_of_index = fs::metadata(get_inverted_index_path(self.get_index_directory_path()))
+            .unwrap()
+            .len() as f64
+            / 1_000_000_000.0;
+        SearchEngineMetadata {
+            no_of_docs: self.indexer.get_no_of_docs(),
+            no_of_terms: self.in_memory_index_metadata.no_of_terms,
+            no_of_blocks: self.in_memory_index_metadata.no_of_blocks,
+            size_of_index: size_of_index,
+            dataset_directory_path: self.get_dataset_directory_path().to_string(),
+            index_directory_path: self.get_index_directory_path().to_string(),
+            compression_algorithm: self.get_compression_algorithm().to_string(),
+            query_algorithm: self.get_query_algorithm().to_string(),
+        }
     }
 
     pub fn handle_query(
@@ -178,7 +214,7 @@ impl SearchEngine {
                 }
             }
         } else {
-            let token_query_result = self.query_parser.tokenize_query(&query);
+            let token_query_result = self.parser.tokenize_query(&query);
             if token_query_result.is_err() {
                 return Err(io::Error::new(io::ErrorKind::Unsupported, "error"));
             }
@@ -199,7 +235,7 @@ impl SearchEngine {
                 query_terms,
                 query_metadata,
                 &self.indexer.document_lengths,
-                self.indexer.avg_doc_length,
+                self.indexer.get_avg_doc_length(),
             );
 
             for doc in &result_docs {

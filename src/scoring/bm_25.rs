@@ -1,10 +1,9 @@
-/// BM25 scoring implementation
-///
-/// Formula:
-/// BM25 = Σ(t∈q) log((N - f_t + 0.5) / (f_t + 0.5)) * TF_BM25
-///
-/// where TF_BM25 = (f_t,d * (k1 + 1)) / (f_t,d + k1 * ((1 - b) + (b * ℓ_d / ℓ_avg)))
+/* BM25 scoring implementation
 
+Formula:
+BM25 = Σ(t∈q) log((N - f_t + 0.5) / (f_t + 0.5)) * TF_BM25
+where TF_BM25 = (f_t,d * (k1 + 1)) / (f_t,d + k1 * ((1 - b) + (b * ℓ_d / ℓ_avg)))
+*/
 /// BM25 parameters
 pub struct BM25Params {
     pub k1: f32, // Term frequency saturation parameter (typical: 1.2)
@@ -17,12 +16,12 @@ impl Default for BM25Params {
     }
 }
 
-/// Compute IDF component for a term
-/// IDF = log((N - f_t + 0.5) / (f_t + 0.5))
-///
-/// # Arguments
-/// * `n` - Total number of documents (N)
-/// * `f_t` - Number of documents containing term t (document frequency)
+/* Compute IDF component for a term
+IDF = log((N - f_t + 0.5) / (f_t + 0.5))
+# Arguments
+* `n` - Total number of documents (N)
+* `f_t` - Number of documents containing term t (document frequency)
+*/
 pub fn compute_idf(n: u32, f_t: u32) -> f32 {
     let n = n as f32;
     let f_t = f_t as f32;
@@ -30,14 +29,14 @@ pub fn compute_idf(n: u32, f_t: u32) -> f32 {
     ((n - f_t + 0.5) / (f_t + 0.5)).ln()
 }
 
-/// Compute TF component for BM25
-/// TF_BM25 = (f_t,d * (k1 + 1)) / (f_t,d + k1 * ((1 - b) + (b * ℓ_d / ℓ_avg)))
-///
-/// # Arguments
-/// * `f_td` - Term frequency in document (f_t,d)
-/// * `doc_len` - Document length (ℓ_d)
-/// * `avg_doc_len` - Average document length (ℓ_avg)
-/// * `params` - BM25 parameters (k1, b)
+/* Compute TF component for BM25
+TF_BM25 = (f_t,d * (k1 + 1)) / (f_t,d + k1 * ((1 - b) + (b * ℓ_d / ℓ_avg)))
+# Arguments
+* `f_td` - Term frequency in document (f_t,d)
+* `doc_len` - Document length (ℓ_d)
+* `avg_doc_len` - Average document length (ℓ_avg)
+* `params` - BM25 parameters (k1, b)
+*/
 pub fn compute_tf_bm25(f_td: u32, doc_len: u32, avg_doc_len: f32, params: &BM25Params) -> f32 {
     let f_td = f_td as f32;
     let doc_len = doc_len as f32;
@@ -50,7 +49,7 @@ pub fn compute_tf_bm25(f_td: u32, doc_len: u32, avg_doc_len: f32, params: &BM25P
     numerator / denominator
 }
 
-/// Compute BM25 score for a single term in a document
+// Compute BM25 score for a single term in a document
 pub fn compute_term_score(
     f_td: u32,        // Term frequency in document
     doc_len: u32,     // Document length

@@ -12,8 +12,6 @@ pub struct SpimiIterator {
     no_of_terms: u32,
     file_reader: BufReader<File>,
     current_term_no: u32,
-
-    // we keep these in
     buffered_terms: Vec<String>,
     buffered_postings: Vec<Vec<u8>>,
     current_buffer_index: usize,
@@ -43,16 +41,14 @@ impl SpimiIterator {
     pub fn get_current_term(&mut self) -> u32 {
         self.current_term_no
     }
-    // Goes over all the entries in the directory and opens iterators to them
+    // Goes over all the temporary indexes in the directory and opens iterators to them
     pub fn scan_and_create_iterators(directory: &str) -> io::Result<Vec<SpimiIterator>> {
         let mut iterators = Vec::with_capacity(50);
 
-        // Read directory entries
         for entry in fs::read_dir(directory)? {
             let entry = entry?;
             let path = entry.path();
 
-            // Check for .tmpidx files
             if path.is_file() {
                 if let Some(ext) = path.extension() {
                     if ext == "tmpidx" {
@@ -94,7 +90,6 @@ impl SpimiIterator {
         self.buffered_postings.clear();
         self.buffered_terms.clear();
 
-        // Reads in terms and postings until the buffer is full
         while (self.current_offset - previous_offset) < BUFFER_SIZE {
             let mut buf = [0u8; 4];
 
@@ -112,7 +107,6 @@ impl SpimiIterator {
             let string_length = u32::from_le_bytes(buf) as usize;
             self.current_offset += 4;
 
-            // Reuse read_buffer
             self.read_buffer.clear();
             self.read_buffer.resize(string_length, 0);
             self.file_reader.read_exact(&mut self.read_buffer)?;

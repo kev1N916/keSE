@@ -10,7 +10,7 @@ use crate::{
 
 pub fn max_score(
     mut term_iterators: Vec<TermIterator>,
-    doc_lengths: &Vec<u32>,
+    doc_lengths: &Box<[u32]>,
     average_doc_length: f32,
 ) -> Vec<(u32, f32)> {
     term_iterators.sort_by(|a, b| a.get_max_score().total_cmp(&b.get_max_score()));

@@ -10,7 +10,7 @@ use std::{cmp::Reverse, f32};
 
 pub fn wand(
     mut term_iterators: Vec<TermIterator>,
-    doc_lengths: &Vec<u32>,
+    doc_lengths: &Box<[u32]>,
     average_doc_length: f32,
 ) -> Vec<(u32, f32)> {
     let max_docs = 50;

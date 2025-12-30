@@ -1,45 +1,120 @@
-use crate::{
-    compressor::vb_encode::{vb_decode, vb_encode},
-    utils::posting::Posting,
+use std::{
+    fs::File,
+    io::{self, BufReader},
+    path::Path,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU32, Ordering},
+        mpsc,
+    },
 };
 
-pub(crate) fn vb_decode_positions(bytes: &[u8]) -> Vec<u32> {
-    let mut positions = Vec::new();
-    let mut offset = 0;
-    let mut last_position = 0;
-    while offset < bytes.len() {
-        let (position, bytes_read) = vb_decode(&bytes[offset..]);
-        if bytes_read == 0 {
-            break;
-        }
-        if last_position == 0 {
-            positions.push(position);
-            last_position = position;
-        } else {
-            positions.push(last_position + position);
-            last_position = last_position + position;
-        }
-        offset += bytes_read;
-    }
+use once_cell::sync::Lazy;
+use regex::Regex;
+use rustc_hash::FxHashMap;
+use zstd::Decoder;
 
-    positions
+use crate::{
+    indexer::types::WikiArticle,
+    parser::parser::Parser,
+    utils::{posting::Posting, term::Term},
+};
+
+static TAG_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"<[^>]*>").unwrap());
+
+pub(crate) fn extract_plaintext(text: &[Vec<String>]) -> String {
+    let total_len: usize = text
+        .iter()
+        .map(|para| para.iter().map(|s| s.len()).sum::<usize>())
+        .sum();
+    let mut result = String::with_capacity(total_len + text.len() * 2);
+    for (i, paragraph) in text.iter().enumerate() {
+        if i > 0 {
+            result.push_str("\n\n");
+        }
+        for sentence in paragraph {
+            result.push_str(sentence);
+        }
+    }
+    TAG_REGEX.replace_all(&result, "").into_owned()
 }
 
-pub(crate) fn vb_encode_positions(positions: &Vec<u32>) -> Vec<u8> {
-    let mut vb_encoded_positions = Vec::<u8>::new();
-    let mut last_position = 0;
-    for position in positions {
-        if last_position == 0 {
-            let mut bytes = vb_encode(position);
-            vb_encoded_positions.append(&mut bytes);
-        } else {
-            let position_difference = *position - last_position;
-            let mut bytes = vb_encode(&position_difference);
-            vb_encoded_positions.append(&mut bytes);
+pub(crate) fn read_zstd_file(
+    path: &Path,
+    tx: &mpsc::SyncSender<Vec<Term>>,
+    doc_id: &Arc<AtomicU32>,
+    doc_lengths: &Arc<Mutex<Vec<u32>>>,
+    doc_urls: &Arc<Mutex<Vec<String>>>,
+    doc_names: &Arc<Mutex<Vec<String>>>,
+    search_tokenizer: &Parser,
+) -> io::Result<()> {
+    let file = File::open(path)?;
+    let decoder = Decoder::new(file)?;
+    let reader = BufReader::new(decoder);
+
+    let stream = serde_json::Deserializer::from_reader(reader).into_iter::<WikiArticle>();
+    let mut terms = Vec::with_capacity(50000);
+
+    let mut local_lengths = Vec::with_capacity(400);
+    let mut local_names = Vec::with_capacity(400);
+    let mut local_urls = Vec::with_capacity(400);
+    let mut local_doc_index = 0u32;
+    for result in stream {
+        match result {
+            Ok(article) => {
+                let mut doc_postings: FxHashMap<&str, Vec<u32>> =
+                    FxHashMap::with_capacity_and_hasher(400, Default::default());
+
+                let plain_text = extract_plaintext(&article.text);
+                let tokens = search_tokenizer.tokenize(&plain_text);
+                if tokens.len() == 0 {
+                    continue;
+                }
+                local_lengths.push(tokens.len() as u32);
+                local_names.push(article.title);
+                local_urls.push(article.url);
+                for token in &tokens {
+                    doc_postings
+                        .entry(&token.word)
+                        .or_insert_with(Vec::new)
+                        .push(token.position);
+                }
+                for (key, value) in doc_postings.drain() {
+                    let term = Term {
+                        posting: Posting::new(local_doc_index, value),
+                        term: key.to_string(),
+                    };
+                    terms.push(term);
+                }
+                local_doc_index += 1;
+            }
+            Err(e) => {
+                eprintln!("Error parsing: {}", e);
+            }
         }
-        last_position = *position
     }
-    vb_encoded_positions
+
+    let start_doc_id = {
+        let mut lengths = doc_lengths.lock().unwrap();
+        let mut names = doc_names.lock().unwrap();
+        let mut urls = doc_urls.lock().unwrap();
+
+        let start_id = doc_id.fetch_add(local_lengths.len() as u32, Ordering::SeqCst);
+
+        lengths.append(&mut local_lengths);
+        names.append(&mut local_names);
+        urls.append(&mut local_urls);
+
+        start_id
+    };
+
+    for term in &mut terms {
+        term.posting.doc_id = start_doc_id + term.posting.doc_id + 1;
+    }
+
+    tx.send(terms).unwrap();
+
+    Ok(())
 }
 
 pub(crate) fn vb_decode_posting_list(encoded_bytes: &[u8]) -> Vec<Posting> {

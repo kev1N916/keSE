@@ -75,6 +75,7 @@ impl SpimiMergeWriter {
         if self.current_block.space_left() <= MINIMUM_BLOCK_SIZE {
             self.write_block_to_index_file()?;
             self.current_block.reset();
+            self.current_block.set_block_id(self.current_block_no);
         }
 
         let mut block_ids: Vec<u32> = Vec::new();
@@ -104,11 +105,12 @@ impl SpimiMergeWriter {
                     self.current_block.add_chunk_bytes(chunk_bytes);
                 } else {
                     self.write_block_to_index_file()?;
+
                     self.current_block.reset();
-
+                    self.current_block.set_block_id(self.current_block_no);
                     self.current_block.add_term(term);
-                    block_ids.push(self.current_block_no);
 
+                    block_ids.push(self.current_block_no);
                     if chunk_bytes.len() as u32 > self.current_block.space_left() {
                         panic!("chunk cannot fit in block")
                     }
@@ -132,8 +134,11 @@ impl SpimiMergeWriter {
                         self.current_block.add_chunk_bytes(chunk_bytes);
                     } else {
                         self.write_block_to_index_file()?;
+
                         self.current_block.reset();
+                        self.current_block.set_block_id(self.current_block_no);
                         self.current_block.add_term(term);
+
                         block_ids.push(self.current_block_no);
                         if chunk_bytes.len() as u32 > self.current_block.space_left() {
                             panic!("chunk cannot fit in block")
