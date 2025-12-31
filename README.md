@@ -76,8 +76,10 @@ https://dumps.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles.xml.bz2
 ```
 
 The data is cleaned using a Python script which compresses it in batches into zstd files. The compressed size of the Wikipedia dump is **24.8 GB**.
-
+After cleaning the Wikipedia dump we are left with about **7.1 million** documents and about **28 million** unique terms(words).
 However, the search engine can work on any type of data as long as it is cleaned.
+
+The script used is present in the folder **python_wikipedia** .
 
 ---
 

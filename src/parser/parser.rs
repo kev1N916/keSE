@@ -25,16 +25,18 @@ pub struct Parser {
 }
 
 use std::collections::HashSet;
-
 pub fn clean_word(word: &str) -> String {
-    // First trim, then lowercase (only lowercase what we need)
-    let trimmed = word.trim_matches(|c: char| !c.is_alphanumeric());
-    trimmed.to_lowercase()
+    // let trimmed = word.trim_matches(|c: char| !c.is_alphanumeric());
+    // unidecode(
+    word.trim_matches(|c: char| !c.is_alphanumeric())
+        .to_lowercase()
+    // )
 }
 
 pub fn is_valid_token(text: &str) -> bool {
-    // Changed .is_ascii_alphabetic() to .is_ascii_alphanumeric()
-    !text.is_empty() && text.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+    !text.is_empty()
+        && text.len() <= 20
+        && text.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
 pub struct TokenizeQueryResult {
@@ -60,7 +62,6 @@ impl Parser {
 
         for word in sentences.split_whitespace() {
             let cleaned_word = clean_word(word);
-
             if !cleaned_word.is_empty()
                 && !self.stop_word_set.contains(&cleaned_word)
                 && is_valid_token(&cleaned_word)
@@ -79,17 +80,15 @@ impl Parser {
         })
     }
 
-    pub fn tokenize(&self, sentences: &str) -> Vec<Token> {
+    pub fn tokenize(&self, sentences: &str, tokens: &mut Vec<Token>) {
         if sentences.trim().is_empty() {
-            return Vec::new();
+            return;
         }
 
-        let mut tokens = Vec::new();
         let mut position = 0;
 
         for word in sentences.split_whitespace() {
             let cleaned_word = clean_word(word);
-
             if !cleaned_word.is_empty()
                 && !self.stop_word_set.contains(&cleaned_word)
                 && is_valid_token(&cleaned_word)
@@ -102,8 +101,6 @@ impl Parser {
 
             position += 1;
         }
-
-        tokens
     }
 }
 
@@ -117,21 +114,12 @@ mod tests {
         assert!(result.is_ok(), "Should successfully create tokenizer");
     }
 
-    // #[test]
-    // fn test_multiple_words() {
-    //     let tokenizer = create_test_tokenizer();
-    //     let input = "the quick brown fox".as_bytes().to_vec();
-    //     let result = tokenizer.tokenize(input).expect("Should tokenize successfully");
-
-    //     assert_eq!(result.len(), 4);
-
-    //     // Check positions are correctly assigned
-    //     for (i, token) in result.iter().enumerate() {
-    //         assert_eq!(token.position, i);
-    //         assert!(!token.word.is_empty());
-    //         assert!(!token.part_of_speech.is_empty());
-    //     }
-    // }
+    #[test]
+    fn test_clean_word_and_validate() {
+        let word = "gear11110114dnpdnpdnpdnp210daniel";
+        let cleaned_word = clean_word(word);
+        println!("{}", is_valid_token(&cleaned_word));
+    }
 
     // #[test]
     // fn test_punctuation_handling() {

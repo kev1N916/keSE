@@ -7,3 +7,10 @@ pub struct WikiArticle {
     pub id: String,
     pub title: String,
 }
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct WikiArticle1 {
+    pub url: String,
+    pub text: String,
+    pub title: String,
+}

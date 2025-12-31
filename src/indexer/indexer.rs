@@ -129,28 +129,30 @@ impl Indexer {
         doc_names: &Arc<Mutex<Vec<String>>>,
         search_tokenizer: &Parser,
     ) -> io::Result<()> {
-        let current_time = SystemTime::now();
+        // let current_time = SystemTime::now();
 
         for entry in std::fs::read_dir(dir_path).unwrap() {
             let entry = entry.unwrap();
             let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) == Some("zstd") {
-                read_zstd_file(
-                    &path,
-                    tx,
-                    doc_id,
-                    doc_lengths,
-                    doc_urls,
-                    doc_names,
-                    search_tokenizer,
-                )?;
+            if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+                if matches!(ext, "zst" | "zstd") {
+                    read_zstd_file(
+                        &path,
+                        tx,
+                        doc_id,
+                        doc_lengths,
+                        doc_urls,
+                        doc_names,
+                        search_tokenizer,
+                    )?;
+                }
             }
         }
-        let now_time = SystemTime::now();
-        println!(
-            "time taken {:?}",
-            now_time.duration_since(current_time).unwrap()
-        );
+        // let now_time = SystemTime::now();
+        // println!(
+        //     "time taken {:?}",
+        //     now_time.duration_since(current_time).unwrap()
+        // );
         Ok(())
     }
 
@@ -228,6 +230,7 @@ impl Indexer {
                 thread::spawn(move || {
                     let mut files_processed = 0;
                     for file in chunk {
+                        println!("{:?}", file.as_os_str());
                         Self::process_directory(
                             &file,
                             &tx,

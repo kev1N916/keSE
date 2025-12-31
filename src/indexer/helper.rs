@@ -1,22 +1,24 @@
 use std::{
     fs::File,
-    io::{self, BufReader},
+    io::{self, BufReader, Read},
     path::Path,
     sync::{
         Arc, Mutex,
         atomic::{AtomicU32, Ordering},
         mpsc,
     },
+    thread::sleep,
+    time::{Duration, SystemTime},
 };
 
 use once_cell::sync::Lazy;
 use regex::Regex;
 use rustc_hash::FxHashMap;
-use zstd::Decoder;
+use zstd::{Decoder, bulk::Decompressor};
 
 use crate::{
-    indexer::types::WikiArticle,
-    parser::parser::Parser,
+    indexer::types::{WikiArticle, WikiArticle1},
+    parser::parser::{Parser, Token},
     utils::{posting::Posting, term::Term},
 };
 
@@ -48,51 +50,163 @@ pub(crate) fn read_zstd_file(
     doc_names: &Arc<Mutex<Vec<String>>>,
     search_tokenizer: &Parser,
 ) -> io::Result<()> {
+    // let file = File::open(path)?;
     let file = File::open(path)?;
-    let decoder = Decoder::new(file)?;
-    let reader = BufReader::new(decoder);
 
-    let stream = serde_json::Deserializer::from_reader(reader).into_iter::<WikiArticle>();
+    // Wrap the file in a Zstd decoder
+    let mut decoder = zstd::Decoder::new(file)?;
+    let mut output: Vec<u8> = Vec::with_capacity(10 * 1024 * 1024); // e.g., 10MB
+    decoder.read_to_end(&mut output).unwrap();
+
+    // zstd::stream::copy_decode(file, output);
+
+    // let reader = BufReader::new(decoder);
+
+    // let stream = serde_json::Deserializer::from_reader(reader).into_iter::<WikiArticle1>();
     let mut terms = Vec::with_capacity(50000);
-
-    let mut local_lengths = Vec::with_capacity(400);
-    let mut local_names = Vec::with_capacity(400);
-    let mut local_urls = Vec::with_capacity(400);
+    let mut local_lengths = Vec::with_capacity(500);
+    let mut local_names = Vec::with_capacity(500);
+    let mut local_urls = Vec::with_capacity(500);
     let mut local_doc_index = 0u32;
-    for result in stream {
-        match result {
-            Ok(article) => {
+
+    let mut start = 0;
+    let mut token_vec: Vec<Token> = Vec::with_capacity(100);
+    // let current_time = SystemTime::now();
+
+    for (i, &byte) in output.iter().enumerate() {
+        if byte == b'\n' {
+            let line = &output[start..i];
+
+            if !line.is_empty() {
+                match serde_json::from_slice::<WikiArticle1>(line) {
+                    Ok(json) => {
+                        // println!("{:?}", json.text);
+                        // sleep(Duration::from_secs(2));
+                        //
+                        // let current_time = SystemTime::now();
+                        let mut doc_postings: FxHashMap<&str, Vec<u32>> =
+                            FxHashMap::with_capacity_and_hasher(400, Default::default());
+                        // // println!("{:?}", article);
+                        // // let plain_text = extract_plaintext(&article.text);
+                        token_vec.clear();
+                        search_tokenizer.tokenize(&json.text, &mut token_vec);
+                        // // println!("{:?}", tokens);
+                        // // sleep(Duration::from_secs(3));
+
+                        if token_vec.len() == 0 {
+                            continue;
+                        }
+                        local_lengths.push(token_vec.len() as u32);
+                        local_names.push(json.title);
+                        local_urls.push(json.url);
+                        for token in &token_vec {
+                            doc_postings
+                                .entry(&token.word)
+                                .or_insert_with(Vec::new)
+                                .push(token.position);
+                        }
+                        // println!("{}", doc_postings.len());
+                        for (key, value) in doc_postings.drain() {
+                            let term = Term {
+                                posting: Posting::new(local_doc_index, value),
+                                term: key.to_string(),
+                            };
+                            terms.push(term);
+                        }
+                        // let now_time = SystemTime::now();
+                        // println!("{:?}", now_time.duration_since(current_time).unwrap());
+                        local_doc_index += 1;
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to parse line: {}", e);
+                        // Optionally print the raw line for debugging
+                        // if let Ok(s) = std::str::from_utf8(line) {
+                        //     eprintln!("Raw line: {}", s);
+                        // }
+                    }
+                }
+            }
+
+            start = i + 1;
+        }
+    }
+
+    // Handle last line
+    if start < output.len() {
+        let line = &output[start..];
+        if !line.is_empty() {
+            if let Ok(json) = serde_json::from_slice::<WikiArticle1>(line) {
                 let mut doc_postings: FxHashMap<&str, Vec<u32>> =
                     FxHashMap::with_capacity_and_hasher(400, Default::default());
-
-                let plain_text = extract_plaintext(&article.text);
-                let tokens = search_tokenizer.tokenize(&plain_text);
-                if tokens.len() == 0 {
-                    continue;
+                // println!("{:?}", article);
+                // let plain_text = extract_plaintext(&article.text);
+                token_vec.clear();
+                search_tokenizer.tokenize(&json.text, &mut token_vec);
+                // println!("{:?}", tokens);
+                // sleep(Duration::from_secs(3));
+                if !token_vec.len() == 0 {
+                    local_lengths.push(token_vec.len() as u32);
+                    local_names.push(json.title);
+                    local_urls.push(json.url);
+                    for token in &token_vec {
+                        doc_postings
+                            .entry(&token.word)
+                            .or_insert_with(Vec::new)
+                            .push(token.position);
+                    }
+                    // println!("{}", doc_postings.len());
+                    for (key, value) in doc_postings.drain() {
+                        let term = Term {
+                            posting: Posting::new(local_doc_index, value),
+                            term: key.to_string(),
+                        };
+                        terms.push(term);
+                    }
+                    // local_doc_index += 1;
                 }
-                local_lengths.push(tokens.len() as u32);
-                local_names.push(article.title);
-                local_urls.push(article.url);
-                for token in &tokens {
-                    doc_postings
-                        .entry(&token.word)
-                        .or_insert_with(Vec::new)
-                        .push(token.position);
-                }
-                for (key, value) in doc_postings.drain() {
-                    let term = Term {
-                        posting: Posting::new(local_doc_index, value),
-                        term: key.to_string(),
-                    };
-                    terms.push(term);
-                }
-                local_doc_index += 1;
-            }
-            Err(e) => {
-                eprintln!("Error parsing: {}", e);
+                // sleep(Duration::from_secs(2));
             }
         }
     }
+
+    // println!("{:?}", local_lengths.len());
+    // for result in stream {
+    //     match result {
+    //         Ok(article) => {
+    // let mut doc_postings: FxHashMap<&str, Vec<u32>> =
+    //     FxHashMap::with_capacity_and_hasher(500, Default::default());
+    // // println!("{:?}", article);
+    // // let plain_text = extract_plaintext(&article.text);
+    // let tokens = search_tokenizer.tokenize(&article.text);
+    // // println!("{:?}", tokens);
+    // // sleep(Duration::from_secs(3));
+
+    // if tokens.len() == 0 {
+    //     continue;
+    // }
+    // local_lengths.push(tokens.len() as u32);
+    // local_names.push(article.title);
+    // local_urls.push(article.url);
+    // for token in &tokens {
+    //     doc_postings
+    //         .entry(&token.word)
+    //         .or_insert_with(Vec::new)
+    //         .push(token.position);
+    // }
+    // for (key, value) in doc_postings.drain() {
+    //     let term = Term {
+    //         posting: Posting::new(local_doc_index, value),
+    //         term: key.to_string(),
+    //     };
+    //     terms.push(term);
+    // }
+    // local_doc_index += 1;
+    //         }
+    //         Err(e) => {
+    //             eprintln!("Error parsing: {}", e);
+    //         }
+    //     }
+    // }
 
     let start_doc_id = {
         let mut lengths = doc_lengths.lock().unwrap();
@@ -111,6 +225,9 @@ pub(crate) fn read_zstd_file(
     for term in &mut terms {
         term.posting.doc_id = start_doc_id + term.posting.doc_id + 1;
     }
+
+    // let now_time = SystemTime::now();
+    // println!("{:?}", now_time.duration_since(current_time).unwrap());
 
     tx.send(terms).unwrap();
 

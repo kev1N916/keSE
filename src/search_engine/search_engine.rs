@@ -201,6 +201,10 @@ impl SearchEngine {
         }
     }
 
+    pub fn get_terms(&self) -> Vec<&str> {
+        self.in_memory_index_metadata.get_all_terms()
+    }
+
     pub fn handle_query(
         &mut self,
         query: String,
@@ -259,6 +263,20 @@ mod tests {
     };
 
     #[test]
+    fn test_create_index() {
+        let mut search_engine = SearchEngine::new(
+            "wikipedia_zstd_batches".to_string(),
+            CompressionAlgorithm::Simple16,
+            QueryAlgorithm::Wand,
+            "index_run_6".to_string(),
+        )
+        .unwrap();
+
+        search_engine.build_index().unwrap();
+        search_engine.save_index().unwrap();
+    }
+
+    #[test]
     fn test_load_document_metadata() {
         let mut search_engine = SearchEngine::new(
             "wikipedia".to_string(),
@@ -274,15 +292,15 @@ mod tests {
     #[test]
     fn test_save_index() {
         let mut search_engine = SearchEngine::new(
-            "wikipedia".to_string(),
+            "wikipedia_zstd_batches".to_string(),
             CompressionAlgorithm::Simple16,
             QueryAlgorithm::Wand,
-            "index_run_2".to_string(),
+            "index_run_6".to_string(),
         )
         .unwrap();
         search_engine.load_document_metadata().unwrap();
         search_engine.merge_spimi_files().unwrap();
-        search_engine.save_index().unwrap();
+        // search_engine.save_index().unwrap();
     }
 
     #[test]
@@ -291,11 +309,12 @@ mod tests {
             "wikipedia".to_string(),
             CompressionAlgorithm::Simple16,
             QueryAlgorithm::Wand,
-            "index_run_2".to_string(),
+            "index_run_4".to_string(),
         )
         .unwrap();
 
         search_engine.load_index().unwrap();
+        println!("{:?}", search_engine.get_index_metadata());
     }
 
     #[test]

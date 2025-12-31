@@ -113,6 +113,7 @@ impl Spimi {
         // The BM25 scoring params are created.
         let bm25_params = BM25Params::default();
         let no_of_docs = document_lengths.len() as u32;
+        let mut no_of_bad_terms = 0;
         loop {
             // We iterate over our iterators to find the smallest term
             // Since the size of the vector is quite small I have chosen to just loop over it.
@@ -146,7 +147,10 @@ impl Spimi {
 
             // The term_frequency is calculated for ranked retrieval
             let term_frequency = final_merged.len() as u32;
-
+            // if term_frequency == 1 {
+            //     no_of_bad_terms += 1;
+            //     // println!("{} {}", term, term_frequency);
+            // }
             // The max_term_score is used for WAND ranked retrieval and needs to be calculated here
             // and stored as metadata
             let mut max_term_score: f32 = f32::MIN;
@@ -200,6 +204,7 @@ impl Spimi {
             // We add the term to the bk_tree as well which helps speed up retrieval
             // in_memory_index.add_term_to_bk_tree(term);
         }
+        // println!("no of bad terms {}", no_of_bad_terms);
         // We close the index_merge_writer so that the remaining terms can be written to the disk.
         spimi_merge_writer.close()?;
         in_memory_index_metadata.close();

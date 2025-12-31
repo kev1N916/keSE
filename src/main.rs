@@ -40,6 +40,7 @@ impl Default for Config {
 
 fn load_config(path: &str) -> Config {
     if Path::new(path).exists() {
+        println!("{:?}", path);
         match fs::read_to_string(path) {
             Ok(contents) => match serde_json::from_str(&contents) {
                 Ok(config) => {
@@ -132,6 +133,16 @@ fn main() {
                     "merge" => {
                         search_engine.merge_spimi_files().unwrap();
                         println!("The index has been built")
+                    }
+                    "terms" => {
+                        let terms = search_engine.get_terms();
+                        let mut max_length = 0;
+                        for term in terms {
+                            if term.len() <= 20 {
+                                println!("{}", term);
+                            }
+                        }
+                        println!("{}", max_length);
                     }
                     "metadata" => {
                         let metadata = search_engine.get_index_metadata();
