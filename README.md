@@ -11,34 +11,35 @@ At the heart of keSE is an **Inverted Index**. While a "forward index" maps docu
 This structure enables lightning-fast lookups. Instead of scanning every document for a keyword, the engine simply jumps to the term in the index and retrieves its associated list of documents.
 
 ---
+# Information Retrieval Resources
 
-## Resources
+A collection of foundational and advanced research papers covering inverted indexes, compression techniques, caching strategies, and query optimization.
 
-An Overview of Inverted Indexes:
+## 📖 Overviews and Fundamentals
+* **An Introduction to Information Retrieval** – *Manning et al.*
+* **Efficient Query Processing for Scalable Web Search** – [Read Online](https://dl.acm.org/doi/abs/10.1561/1500000057)
 
-An Introduction to Information Retrieval by Manning 
-Efficient Query Processing for Scalable Web Search->[https://dl.acm.org/doi/abs/10.1561/1500000057]
+## 🗜️ Compression Techniques
+* **Inverted Index Compression and Query Processing with Optimized Document Ordering** – [Read Online](https://dl.acm.org/doi/10.1145/1526709.1526764)
+* **Performance of Compressed Inverted List Caching in Search Engines** – [Read Online](https://dl.acm.org/doi/10.1145/1367497.1367550)
+* **Compressing Term Positions in Web Indexes** – [Read Online](https://dl.acm.org/doi/10.1145/1571941.1571969)
+* **Index Compression through Document Reordering** – [Read Online](https://dl.acm.org/doi/10.5555/882455.875020)
 
-Compression in Inverted Indexes:
-Inverted Index Compression and Query Processing with Optimized Document Ordering->[https://dl.acm.org/doi/10.1145/1526709.1526764]
-Performance of Compressed Inverted List Caching in Search Engines->[https://dl.acm.org/doi/10.1145/1367497.1367550]
-Compressing Term Positions in Web Indexes->[https://dl.acm.org/doi/10.1145/1571941.1571969]
-Index Compression through Document Reordering->[https://dl.acm.org/doi/10.5555/882455.875020]
+## ⚡ Caching Strategies
+* **Improved Techniques for Result Caching in Web Search Engines** – [Read Online](https://dl.acm.org/doi/10.1145/1526709.1526768)
+* **Rank-Preserving Two-Level Caching for Scalable Search Engines** – [Read Online](https://dl.acm.org/doi/10.1145/383952.383959)
+* **On-Line File Caching** – [arXiv:cs/0205033](https://arxiv.org/abs/cs/0205033)
 
-Caching in Inverted Indexes:
-Improved Techniques for Result Caching in Web Search Engines->[https://dl.acm.org/doi/10.1145/1526709.1526768]
-Rank-Preserving Two-Level Caching for Scalable Search Engines->[https://dl.acm.org/doi/10.1145/383952.383959]
-On-Line File Caching->[https://arxiv.org/abs/cs/0205033]
+## 🔍 Query Processing & Optimization
+* **Faster Top-k Document Retrieval Using Block-Max Indexes** – [Read Online](https://dl.acm.org/doi/10.1145/2009916.2010048)
+* **MWAND: A New Early Termination Algorithm for Fast and Efficient Query Evaluation** – [ResearchGate](https://www.researchgate.net/publication/333435122_MWAND_A_New_Early_Termination_Algorithm_for_Fast_and_Efficient_Query_Evaluation)
+* **Optimization Strategies for Complex Queries** – [Read Online](https://dl.acm.org/doi/10.1145/1076034.1076074)
+* **Faster BlockMax WAND with Longer Skipping** – [Read Online](https://dl.acm.org/doi/10.1007/978-3-030-15712-8_52)
 
-Query Processing in Inverted Indexes:
-Faster Top-k Document Retrieval Using Block-Max Indexes->[https://dl.acm.org/doi/10.1145/2009916.2010048]
-MWAND: A New Early Termination Algorithm for Fast and Efficient Query Evaluation-> [https://www.researchgate.net/publication/333435122_MWAND_A_New_Early_Termination_Algorithm_for_Fast_and_Efficient_Query_Evaluation]
-Optimization strategies for complex queries->[https://dl.acm.org/doi/10.1145/1076034.1076074]
-Faster BlockMax WAND with Longer Skipping->[https://dl.acm.org/doi/10.1007/978-3-030-15712-8_52]
-
-Document Reordering
-Document reordering for faster intersection->[https://dl.acm.org/doi/10.14778/3303753.3303755]
-Inverted file compression through document identifier reassignment->[https://www.sciencedirect.com/science/article/pii/S0306457302000201]
+## 📂 Document Reordering
+* **Document Reordering for Faster Intersection** – [Read Online](https://dl.acm.org/doi/10.14778/3303753.3303755)
+* **Inverted File Compression Through Document Identifier Reassignment** – [ScienceDirect](https://www.sciencedirect.com/science/article/pii/S0306457302000201)
+  
 ## Why use SPIMI?
 
 Building an index for millions of documents often exceeds available RAM. SPIMI is a highly efficient indexing algorithm that addresses this through:
