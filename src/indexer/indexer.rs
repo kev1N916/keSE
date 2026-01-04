@@ -189,14 +189,13 @@ impl Indexer {
     // Starts the spmi function in another thread and then starts processing the directory
     // which we need to index
     fn start_spimi(&mut self) -> io::Result<()> {
-        let (tx, rx) = mpsc::sync_channel::<Vec<Term>>(10);
         let files: Vec<_> = std::fs::read_dir(self.get_dataset_directory_path())
             .unwrap()
             .filter_map(|e| e.ok())
             .map(|e| e.path())
             .collect();
 
-        let estimated_docs = 6_000_000;
+        let estimated_docs = 8_000_000;
 
         // We use an instance of doc_id which is passed to the indexing threads
         // This currently makes it faster
@@ -207,6 +206,8 @@ impl Indexer {
         let doc_urls = Arc::new(Mutex::new(Vec::with_capacity(estimated_docs)));
 
         let mut spmi = Spimi::new(self.get_index_directory_path().to_string());
+        let (tx, rx) = mpsc::sync_channel::<Vec<Term>>(10);
+
         // the spimi function is started
         let handle = thread::spawn(move || {
             spmi.single_pass_in_memory_indexing(rx).unwrap();
@@ -231,6 +232,7 @@ impl Indexer {
                     let mut files_processed = 0;
                     for file in chunk {
                         println!("{:?}", file.as_os_str());
+                        let current_time = SystemTime::now();
                         Self::process_directory(
                             &file,
                             &tx,
@@ -242,6 +244,8 @@ impl Indexer {
                         )
                         .unwrap();
                         files_processed += 1;
+                        let now_time = SystemTime::now();
+                        println!("takes {:?}", now_time.duration_since(current_time));
                         println!("Out of {} files, done with {}", chunk_size, files_processed);
                     }
                 })
@@ -327,7 +331,7 @@ mod tests {
 
     #[test]
     fn test_start_spimi() {
-        let query_parser = Parser::new().unwrap();
+        let query_parser = Parser::new();
         // let temp_dir = TempDir::new().unwrap();
         let result_path = "index_run_2".to_string();
         let path = Path::new(&result_path);
@@ -349,7 +353,7 @@ mod tests {
 
     #[test]
     fn test_save_document_metadata() {
-        let query_parser = Parser::new().unwrap();
+        let query_parser = Parser::new();
         // let temp_dir = TempDir::new().unwrap();
         let result_path = "index_run_2".to_string();
         let path = Path::new(&result_path);
@@ -376,7 +380,7 @@ mod tests {
 
     #[test]
     fn test_load_document_metadata() {
-        let query_parser = Parser::new().unwrap();
+        let query_parser = Parser::new();
         // let temp_dir = TempDir::new().unwrap();
         let result_path = "index_run_2".to_string();
         let path = Path::new(&result_path);

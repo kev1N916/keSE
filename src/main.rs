@@ -4,7 +4,8 @@ use rustyline::error::ReadlineError;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
-use std::time::SystemTime;
+use std::thread::sleep;
+use std::time::{Duration, SystemTime};
 
 use crate::compressor::compressor::CompressionAlgorithm;
 use crate::query_processor::retrieval_algorithms::QueryAlgorithm;
@@ -136,13 +137,17 @@ fn main() {
                     }
                     "terms" => {
                         let terms = search_engine.get_terms();
-                        let mut max_length = 0;
+                        println!("{}", terms.len());
+                        // let mut max_length = 0;
                         for term in terms {
-                            if term.len() <= 20 {
+                            // if term.len() <= 20 {
+                            if term.contains("-") {
                                 println!("{}", term);
+                                sleep(Duration::from_secs(1));
                             }
+                            // }
                         }
-                        println!("{}", max_length);
+                        // println!("{}", max_length);
                     }
                     "metadata" => {
                         let metadata = search_engine.get_index_metadata();

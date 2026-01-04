@@ -12,6 +12,33 @@ This structure enables lightning-fast lookups. Instead of scanning every documen
 
 ---
 
+## Resources
+
+An Overview of Inverted Indexes:
+
+An Introduction to Information Retrieval by Manning 
+Efficient Query Processing for Scalable Web Search->[https://dl.acm.org/doi/abs/10.1561/1500000057]
+
+Compression in Inverted Indexes:
+Inverted Index Compression and Query Processing with Optimized Document Ordering->[https://dl.acm.org/doi/10.1145/1526709.1526764]
+Performance of Compressed Inverted List Caching in Search Engines->[https://dl.acm.org/doi/10.1145/1367497.1367550]
+Compressing Term Positions in Web Indexes->[https://dl.acm.org/doi/10.1145/1571941.1571969]
+Index Compression through Document Reordering->[https://dl.acm.org/doi/10.5555/882455.875020]
+
+Caching in Inverted Indexes:
+Improved Techniques for Result Caching in Web Search Engines->[https://dl.acm.org/doi/10.1145/1526709.1526768]
+Rank-Preserving Two-Level Caching for Scalable Search Engines->[https://dl.acm.org/doi/10.1145/383952.383959]
+On-Line File Caching->[https://arxiv.org/abs/cs/0205033]
+
+Query Processing in Inverted Indexes:
+Faster Top-k Document Retrieval Using Block-Max Indexes->[https://dl.acm.org/doi/10.1145/2009916.2010048]
+MWAND: A New Early Termination Algorithm for Fast and Efficient Query Evaluation-> [https://www.researchgate.net/publication/333435122_MWAND_A_New_Early_Termination_Algorithm_for_Fast_and_Efficient_Query_Evaluation]
+Optimization strategies for complex queries->[https://dl.acm.org/doi/10.1145/1076034.1076074]
+Faster BlockMax WAND with Longer Skipping->[https://dl.acm.org/doi/10.1007/978-3-030-15712-8_52]
+
+Document Reordering
+Document reordering for faster intersection->[https://dl.acm.org/doi/10.14778/3303753.3303755]
+Inverted file compression through document identifier reassignment->[https://www.sciencedirect.com/science/article/pii/S0306457302000201]
 ## Why use SPIMI?
 
 Building an index for millions of documents often exceeds available RAM. SPIMI is a highly efficient indexing algorithm that addresses this through:
@@ -76,7 +103,7 @@ https://dumps.wikimedia.org/enwiki/latest/enwiki-latest-pages-articles.xml.bz2
 ```
 
 The data is cleaned using a Python script which compresses it in batches into zstd files. The compressed size of the Wikipedia dump is **24.8 GB**.
-After cleaning the Wikipedia dump we are left with about **7.1 million** documents and about **28 million** unique terms(words).
+After cleaning the Wikipedia dump we are left with about **7.1 million** documents and about **18 million** unique terms(words).
 However, the search engine can work on any type of data as long as it is cleaned.
 
 The script used is present in the folder **python_wikipedia** .

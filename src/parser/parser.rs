@@ -1,4 +1,3 @@
-use std::io;
 // A custom error type to represent our possible errors
 #[derive(Debug)]
 pub enum TokenizationError {
@@ -25,59 +24,54 @@ pub struct Parser {
 }
 
 use std::collections::HashSet;
-pub fn clean_word(word: &str) -> String {
+pub fn clean_word(word: &str) -> &str {
     // let trimmed = word.trim_matches(|c: char| !c.is_alphanumeric());
     // unidecode(
     word.trim_matches(|c: char| !c.is_alphanumeric())
-        .to_lowercase()
+    // .to_lowercase()
     // )
 }
 
-pub fn is_valid_token(text: &str) -> bool {
-    !text.is_empty()
-        && text.len() <= 20
-        && text.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+#[inline]
+pub fn is_valid_text(text: &str) -> bool {
+    if text.is_empty()
+        || text.starts_with('-')
+        || text.ends_with('-')
+        // || text.len() > 30
+        || !text.chars().all(|c| c.is_ascii_alphabetic() || c == '-')
+    {
+        return false;
+    }
+    true
 }
 
-pub struct TokenizeQueryResult {
-    pub unigram: Vec<Token>,
+#[inline]
+fn is_valid_date(text: &str) -> bool {
+    let b = text.as_bytes();
+    match b.len() {
+        1 => b[0].is_ascii_digit(),
+        2 => b[0].is_ascii_digit() && b[1].is_ascii_digit(),
+        3 => b[0].is_ascii_digit() && b[1].is_ascii_digit() && b[2].is_ascii_digit(),
+        4 => {
+            b[0].is_ascii_digit()
+                && b[1].is_ascii_digit()
+                && b[2].is_ascii_digit()
+                && b[3].is_ascii_digit()
+                && b[0] >= b'1'
+                && b[0] <= b'2'
+        }
+        _ => false,
+    }
 }
+
+// pub struct TokenizeQueryResult {
+//     pub unigram: Vec<Token>,
+// }
 
 impl Parser {
-    pub fn new() -> Result<Parser, io::Error> {
+    pub fn new() -> Parser {
         let stop_word_set: HashSet<String> = STOP_WORDS.iter().map(|&s| s.to_string()).collect();
-        Ok(Parser { stop_word_set })
-    }
-
-    pub fn tokenize_query(
-        &self,
-        sentences: &str,
-    ) -> Result<TokenizeQueryResult, TokenizationError> {
-        if sentences.trim().is_empty() {
-            return Err(TokenizationError::EmptyInput);
-        }
-
-        let mut unigram_tokens: Vec<Token> = Vec::new();
-        let mut position = 0;
-
-        for word in sentences.split_whitespace() {
-            let cleaned_word = clean_word(word);
-            if !cleaned_word.is_empty()
-                && !self.stop_word_set.contains(&cleaned_word)
-                && is_valid_token(&cleaned_word)
-            {
-                unigram_tokens.push(Token {
-                    position,
-                    word: cleaned_word,
-                });
-            }
-
-            position += 1;
-        }
-
-        Ok(TokenizeQueryResult {
-            unigram: unigram_tokens,
-        })
+        Parser { stop_word_set }
     }
 
     pub fn tokenize(&self, sentences: &str, tokens: &mut Vec<Token>) {
@@ -89,17 +83,18 @@ impl Parser {
 
         for word in sentences.split_whitespace() {
             let cleaned_word = clean_word(word);
-            if !cleaned_word.is_empty()
-                && !self.stop_word_set.contains(&cleaned_word)
-                && is_valid_token(&cleaned_word)
-            {
-                tokens.push(Token {
-                    position,
-                    word: cleaned_word,
-                });
+            if !cleaned_word.is_empty() {
+                let new_word = cleaned_word.to_lowercase();
+                if !self.stop_word_set.contains(&new_word)
+                    && (is_valid_text(&new_word) || is_valid_date(&new_word))
+                {
+                    tokens.push(Token {
+                        position,
+                        word: new_word,
+                    });
+                    position += 1;
+                }
             }
-
-            position += 1;
         }
     }
 }
@@ -109,16 +104,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_new_tokenizer_creation() {
-        let result = Parser::new();
-        assert!(result.is_ok(), "Should successfully create tokenizer");
-    }
-
-    #[test]
     fn test_clean_word_and_validate() {
-        let word = "gear11110114dnpdnpdnpdnp210daniel";
+        let word = "left-right";
         let cleaned_word = clean_word(word);
-        println!("{}", is_valid_token(&cleaned_word));
+        println!("{}", cleaned_word);
+        // let parts: Vec<&str> = word.split('-').filter(|s| !s.is_empty()).collect();
+        // let parser = Parser::new();
+        // let buffer = Vec::new();
+        // let parts: Vec<&str> = word.split('-').filter(|s| !s.is_empty()).collect();
+        // // let splt = cleaned_word.split_terminator("-").collect();
+        // println!("{:?}", parts);
+        println!("{}", is_valid_text(&cleaned_word));
     }
 
     // #[test]

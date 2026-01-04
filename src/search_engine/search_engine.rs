@@ -61,7 +61,7 @@ impl SearchEngine {
                 }
             }
         }
-        let parser = Parser::new()?;
+        let parser = Parser::new();
         let mut indexer = Indexer::new(
             parser.clone(),
             compression_algorithm.clone(),
@@ -218,15 +218,11 @@ impl SearchEngine {
                 }
             }
         } else {
-            let token_query_result = self.parser.tokenize_query(&query);
-            if token_query_result.is_err() {
-                return Err(io::Error::new(io::ErrorKind::Unsupported, "error"));
-            }
-
-            let tokens = token_query_result.unwrap();
-            let mut query_terms = Vec::with_capacity(tokens.unigram.len());
-            let mut query_metadata = Vec::with_capacity(tokens.unigram.len());
-            for token in tokens.unigram {
+            let mut tokens = Vec::new();
+            self.parser.tokenize(&query, &mut tokens);
+            let mut query_terms = Vec::with_capacity(tokens.len());
+            let mut query_metadata = Vec::with_capacity(tokens.len());
+            for token in tokens {
                 if let Some(term_metadata) =
                     self.in_memory_index_metadata.get_term_metadata(&token.word)
                 {
@@ -268,7 +264,7 @@ mod tests {
             "wikipedia_zstd_batches".to_string(),
             CompressionAlgorithm::Simple16,
             QueryAlgorithm::Wand,
-            "index_run_6".to_string(),
+            "index_run_12".to_string(),
         )
         .unwrap();
 
@@ -295,12 +291,12 @@ mod tests {
             "wikipedia_zstd_batches".to_string(),
             CompressionAlgorithm::Simple16,
             QueryAlgorithm::Wand,
-            "index_run_6".to_string(),
+            "index_run_2".to_string(),
         )
         .unwrap();
         search_engine.load_document_metadata().unwrap();
         search_engine.merge_spimi_files().unwrap();
-        // search_engine.save_index().unwrap();
+        search_engine.save_index().unwrap();
     }
 
     #[test]

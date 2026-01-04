@@ -1,5 +1,5 @@
 {
-  "index_dir": "index_run_5",
+  "index_dir": "index_run_9",
   "dataset_dir": "wikipedia_zstd_batches",
   "compression_algo": "simple16",
   "query_algo": "bmms"

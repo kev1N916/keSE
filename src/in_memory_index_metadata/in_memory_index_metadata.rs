@@ -37,12 +37,12 @@ impl InMemoryIndexMetadata {
             no_of_blocks: 0,
             no_of_terms: 0,
             bk_tree: BkTree::new(),
-            term_to_id_map: HashMap::with_capacity(6_000_000),
-            term_frequencies: Vec::with_capacity(6_000_000),
-            term_max_scores: Vec::with_capacity(6_000_000),
-            term_block_ids: Vec::with_capacity(6_000_000),
-            term_block_id_offsets: Vec::with_capacity(6_000_000),
-            term_block_max_metadata: Vec::with_capacity(6_000_000),
+            term_to_id_map: HashMap::with_capacity(15_000_000),
+            term_frequencies: Vec::with_capacity(15_000_000),
+            term_max_scores: Vec::with_capacity(15_000_000),
+            term_block_ids: Vec::with_capacity(15_000_000),
+            term_block_id_offsets: Vec::with_capacity(15_000_000),
+            term_block_max_metadata: Vec::with_capacity(15_000_000),
         }
     }
 
